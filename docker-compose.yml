@@ -12,6 +12,8 @@ services:
         REACT_APP_FEATURE_FLAG_ESS_FEATURE: ${ESS_FEATURE_ENABLED:-false}
     ports:
       - "80:80"
+    environment:
+      - NGINX_BACKEND_UPSTREAM=${NGINX_BACKEND_UPSTREAM:-localhost:3000}
     depends_on:
       - server
     networks:

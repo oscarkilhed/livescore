@@ -6,13 +6,8 @@ http {
     include       /etc/nginx/mime.types;
     default_type  application/octet-stream;
 
-    # Upstream backend API
-    # NOTE: This file is for reference only. The actual config is generated from nginx.conf.template
-    # at runtime using envsubst. Defaults to localhost:3000 for Lightsail.
-    # For Docker Compose, set NGINX_BACKEND_UPSTREAM=server:3000 in docker-compose.e2e.yml
-    upstream backend {
-        server localhost:3000;
-    }
+    # Resolver for dynamic upstream resolution (needed for Docker service names)
+    resolver 127.0.0.11 valid=30s;
 
     server {
         listen 80 default_server;
@@ -30,9 +25,11 @@ http {
         }
 
         # Route API requests to backend
-        location /api/ {
-            rewrite ^/api/(.*) /$1 break;
-            proxy_pass http://backend;
+        location ~ ^/api/(.*)$ {
+            # Use variable to resolve upstream at runtime instead of startup
+            # This allows Docker service names to be resolved dynamically
+            set $backend_upstream "http://${NGINX_BACKEND_UPSTREAM}";
+            proxy_pass $backend_upstream/$1$is_args$args;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
