@@ -160,7 +160,7 @@ test.describe('SSI Flow', () => {
 
   test('should handle API errors gracefully', async ({ page }) => {
     // Override the mock to return an error
-    await page.route('**/api/*/parse', async (route) => {
+    await page.route('**/api/**/parse', async (route) => {
       await route.fulfill({
         status: 500,
         contentType: 'application/json',
@@ -170,12 +170,13 @@ test.describe('SSI Flow', () => {
     
     await page.goto('/?matchId=99999&typeId=22&division=hg18');
     
-    // Wait a bit for the error to appear
-    await page.waitForTimeout(1000);
+    // Wait for the error to appear - check for the error paragraph element
+    const errorMessage = page.locator('p.error').or(page.getByText(/error|failed/i));
+    await expect(errorMessage.first()).toBeVisible({ timeout: 5000 });
     
-    // Check that error message is displayed
-    const errorMessage = page.getByText(/error|failed/i);
-    await expect(errorMessage.first()).toBeVisible({ timeout: 3000 });
+    // Verify the error message contains expected text
+    const errorText = await errorMessage.first().textContent();
+    expect(errorText?.toLowerCase()).toMatch(/error|failed/);
   });
 
   test('should update URL when form parameters change', async ({ page }) => {
