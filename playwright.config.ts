@@ -56,12 +56,15 @@ export default defineConfig({
   ],
 
   /* Run your local dev server before starting the tests */
-  webServer: {
-    command: process.env.MOCK_SSI_API === 'true' || process.env.MOCK_SSI_API === '1'
-      ? 'MOCK_SSI_API=true docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d'
-      : 'docker compose up -d',
-    url: 'http://localhost:80',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
-  },
+  /* In CI, services are started manually in the workflow, so webServer is disabled */
+  ...(process.env.CI ? {} : {
+    webServer: {
+      command: process.env.MOCK_SSI_API === 'true' || process.env.MOCK_SSI_API === '1'
+        ? 'MOCK_SSI_API=true docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d'
+        : 'docker compose up -d',
+      url: 'http://localhost:80',
+      reuseExistingServer: true,
+      timeout: 120 * 1000,
+    },
+  }),
 });
