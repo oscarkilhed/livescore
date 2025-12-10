@@ -69,7 +69,7 @@ ESS_FEATURE_ENABLED=true
 
 Rebuild and restart:
 ```bash
-docker-compose up --build -d
+docker compose up --build -d
 ```
 
 ### Production Deployment
@@ -111,10 +111,10 @@ export ESS_FEATURE_ENABLED=true
 export REACT_APP_FEATURE_FLAG_ESS_FEATURE=true
 
 # Rebuild client with feature flag
-docker-compose build client
+docker compose build client
 
 # Start services
-docker-compose up -d
+docker compose up -d
 
 # Run tests
 npm run test:e2e
@@ -177,13 +177,13 @@ function getFeatureFlagsFromEnv(): Partial<FeatureFlagConfig> {
 ### ESS tab not showing
 
 1. Check that `REACT_APP_FEATURE_FLAG_ESS_FEATURE=true` was set at **build time**
-2. Rebuild the client: `docker-compose build client`
-3. Restart services: `docker-compose restart client`
+2. Rebuild the client: `docker compose build client`
+3. Restart services: `docker compose restart client`
 
 ### ESS endpoint returns 403
 
 1. Check that `ESS_FEATURE_ENABLED=true` is set in server environment
-2. Restart server: `docker-compose restart server`
+2. Restart server: `docker compose restart server`
 3. Verify: `curl http://localhost/api/ecm/txt/parse` should not return 403
 
 ### Tests failing

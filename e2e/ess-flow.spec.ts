@@ -7,7 +7,7 @@ import path from 'path';
  * Tests the complete user journey of pasting ECM text and parsing it
  * 
  * Note: These tests require the ESS_FEATURE_ENABLED feature flag to be enabled.
- * Set ESS_FEATURE_ENABLED=true in your environment or docker-compose.yml to run these tests.
+ * Set ESS_FEATURE_ENABLED=true in your environment or docker compose configuration to run these tests.
  */
 test.describe('ESS Flow', () => {
   test.beforeEach(async ({ page }) => {

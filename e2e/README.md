@@ -29,7 +29,7 @@ This directory contains E2E (end-to-end) tests using Playwright for testing the 
 
 1. Ensure Docker services are running:
    ```bash
-   docker-compose up -d
+   docker compose up -d
    ```
 
 2. Wait for services to be ready (check health endpoint):
@@ -98,7 +98,7 @@ The mock SSI API is automatically enabled when running e2e tests via Playwright 
 To manually enable it:
 
 ```bash
-MOCK_SSI_API=true docker-compose -f docker-compose.yml -f docker-compose.e2e.yml up -d
+MOCK_SSI_API=true docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d
 ```
 
 ## CI/CD Integration

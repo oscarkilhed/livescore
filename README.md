@@ -74,7 +74,7 @@ npm start
 
 1. Build and start all services:
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
 The application will be available at `http://localhost:80`
@@ -82,7 +82,7 @@ The application will be available at `http://localhost:80`
 2. Or use the build script:
 ```bash
 ./build.sh
-docker-compose up -d
+docker compose up -d
 ```
 
 ## Usage
