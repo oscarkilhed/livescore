@@ -13,6 +13,10 @@ import { AppError, ValidationError, FeatureDisabledError, ParseError } from './e
 export const app = express();
 const port = config.port;
 
+// Trust proxy - required when behind nginx reverse proxy
+// This allows Express to correctly identify client IPs from X-Forwarded-For header
+app.set('trust proxy', true);
+
 // Enable CORS for all routes
 app.use(cors());
 // Parse JSON request bodies
