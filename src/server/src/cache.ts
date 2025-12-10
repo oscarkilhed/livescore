@@ -35,11 +35,11 @@ function evictOldestEntry(): void {
  * to implement timeout functionality.
  * 
  * @param url - The URL to fetch
- * @param timeoutMs - Timeout in milliseconds (default: 15000)
+ * @param timeoutMs - Timeout in milliseconds (default: 30000)
  * @returns Promise resolving to the Response from node-fetch
  * @throws FetchError if request times out or fails
  */
-async function fetchWithTimeout(url: string, timeoutMs: number = 15000): Promise<Response> {
+async function fetchWithTimeout(url: string, timeoutMs: number = 30000): Promise<Response> {
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
       reject(new Error('Request timeout'));
