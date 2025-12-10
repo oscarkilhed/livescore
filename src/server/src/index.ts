@@ -1,8 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
-import parseLivescore, { parseECMTxt } from './parser';
-import { getCachedHtml, __cache } from './cache';
+import { parseECMTxt } from './parser';
+import { getCachedStages, __cache } from './cache';
 import { config } from './config';
 import { AppError, ValidationError, FeatureDisabledError, ParseError } from './errors';
 
@@ -93,11 +93,7 @@ app.get('/:matchType/:matchId/:division/parse', async (req, res) => {
   }
 
   try {
-    const html = await getCachedHtml(matchType.toString(), matchId.toString(), division.toString());
-    const parseStartTime = Date.now();
-    const stages = parseLivescore(html);
-    const parseElapsed = Date.now() - parseStartTime;
-    console.log(`[Parse] Successfully parsed livescore for matchType=${matchType}, matchId=${matchId}, division=${division} in ${parseElapsed}ms (${stages.length} stages)`);
+    const stages = await getCachedStages(matchType.toString(), matchId.toString(), division.toString());
     res.json(stages);
   } catch (error) {
     if (error instanceof AppError) {

@@ -1,6 +1,8 @@
 import fetch, { Response } from 'node-fetch';
 import { config, buildSsiApiUrl } from './config';
 import { FetchError } from './errors';
+import parseLivescore from './parser';
+import { Stage } from './types';
 
 /**
  * Maximum number of cached entries before eviction
@@ -8,11 +10,11 @@ import { FetchError } from './errors';
 const MAX_CACHE_SIZE = 100;
 
 /**
- * In-memory cache for HTML responses from the SSI API.
+ * In-memory cache for parsed stages from the SSI API.
  * Key format: `${eventId}-${matchId}-${division}`
- * Value: { html: string, timestamp: number }
+ * Value: { stages: Stage[], timestamp: number }
  */
-const cache: Record<string, { html: string; timestamp: number }> = {};
+const cache: Record<string, { stages: Stage[]; timestamp: number }> = {};
 
 /**
  * Evicts the oldest cache entry if cache size exceeds MAX_CACHE_SIZE
@@ -74,32 +76,32 @@ async function fetchWithTimeout(url: string, timeoutMs: number = 120000): Promis
 export const __cache = cache;
 
 /**
- * Fetches HTML from the SSI API with caching support.
+ * Fetches and parses stages from the SSI API with caching support.
  * 
  * Cached responses are valid for the duration specified by `config.cacheTtl`.
  * If a cached response exists and is still valid, it is returned immediately.
- * Otherwise, a fresh request is made to the SSI API.
+ * Otherwise, a fresh request is made to the SSI API, parsed, and cached.
  * 
  * @param eventId - The event/type ID from ShootnScoreIt.com
  * @param matchId - The match ID from ShootnScoreIt.com
  * @param division - The division code (e.g., 'hg18' for Production Optics)
- * @returns Promise resolving to the HTML content from the SSI API
- * @throws Error if the HTTP request fails (non-2xx status)
+ * @returns Promise resolving to parsed stages from the SSI API
+ * @throws Error if the HTTP request fails (non-2xx status) or parsing fails
  * 
  * @example
  * ```typescript
- * const html = await getCachedHtml('22', '21833', 'hg18');
+ * const stages = await getCachedStages('22', '21833', 'hg18');
  * ```
  */
-export async function getCachedHtml(eventId: string, matchId: string, division: string): Promise<string> {
+export async function getCachedStages(eventId: string, matchId: string, division: string): Promise<Stage[]> {
   const cacheKey = `${eventId}-${matchId}-${division}`;
   const cachedData = cache[cacheKey];
   
   if (cachedData && Date.now() - cachedData.timestamp < config.cacheTtl) {
-    // Using cached HTML
+    // Using cached parsed stages
     const cacheAge = Date.now() - cachedData.timestamp;
-    console.log(`[Cache] Using cached HTML for ${cacheKey} (age: ${Math.round(cacheAge / 1000)}s)`);
-    return cachedData.html;
+    console.log(`[Cache] Using cached parsed stages for ${cacheKey} (age: ${Math.round(cacheAge / 1000)}s, ${cachedData.stages.length} stages)`);
+    return cachedData.stages;
   }
 
   // Fetching fresh HTML with timeout
@@ -120,18 +122,25 @@ export async function getCachedHtml(eventId: string, matchId: string, division: 
     }
     
     const html = await response.text();
+    const fetchElapsed = Date.now() - fetchStartTime;
+    console.log(`[SSI API] Successfully fetched HTML from ${url} (fetch time: ${fetchElapsed}ms, size: ${html.length} bytes)`);
+    
+    // Parse the HTML
+    const parseStartTime = Date.now();
+    const stages = parseLivescore(html);
+    const parseElapsed = Date.now() - parseStartTime;
     const totalElapsed = Date.now() - fetchStartTime;
-    console.log(`[SSI API] Successfully fetched and parsed HTML from ${url} (total time: ${totalElapsed}ms, size: ${html.length} bytes)`);
+    console.log(`[Parse] Successfully parsed HTML in ${parseElapsed}ms (${stages.length} stages, total time: ${totalElapsed}ms)`);
     
     // Evict oldest entry if cache is full
     evictOldestEntry();
     
     cache[cacheKey] = {
-      html,
+      stages,
       timestamp: Date.now()
     };
     
-    return html;
+    return stages;
   } catch (error) {
     const elapsed = Date.now() - fetchStartTime;
     if (error instanceof FetchError && error.statusCode === 504) {
