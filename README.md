@@ -1,11 +1,10 @@
 # Livescore
 
-A web application for calculating and comparing IPSC (International Practical Shooting Confederation) live scores from ShootnScoreIt.com and ECM text files.
+A web application for calculating and comparing IPSC (International Practical Shooting Confederation) live scores from ShootnScoreIt.com.
 
 ## Features
 
 - **Live Score Fetching**: Fetch and parse live scores from ShootnScoreIt.com
-- **ECM Text Parsing**: Parse and analyze scores from ECM (European Championship Match) text files
 - **Score Calculation**: Calculate competitor scores across multiple stages with proper hit factor calculations
 - **Competitor Comparison**: Compare specific competitors across common stages
 - **Division Support**: Support for multiple IPSC divisions:
@@ -95,12 +94,6 @@ docker-compose up -d
 3. Optionally paste a ShootnScoreIt URL (the app will extract IDs automatically)
 4. Click "Get Scores" to fetch and display scores
 
-### ESS (ECM) Mode
-
-1. Navigate to the ESS tab
-2. Paste ECM text file content into the text area
-3. Click "Parse" to analyze the scores
-
 ### Comparing Competitors
 
 1. After loading scores, select competitors using the multi-select dropdown
@@ -131,14 +124,6 @@ Fetches and parses live scores from ShootnScoreIt.com
 - `matchType`: Event type ID
 - `matchId`: Match ID
 - `division`: Division code
-
-**Response:** JSON array of stages with competitors
-
-### POST `/ecm/txt/parse`
-
-Parses ECM text file content
-
-**Body:** Plain text ECM file content
 
 **Response:** JSON array of stages with competitors
 
@@ -236,10 +221,6 @@ livescore/
 - `src/server/test/` - Test data files (HTML, ECM text)
 - Root level - Docker configurations and project documentation
 
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on contributing to this project.
-
 ## License
 
 See [LICENSE](LICENSE) file for details.
@@ -247,4 +228,4 @@ See [LICENSE](LICENSE) file for details.
 ## Acknowledgments
 
 - Uses data from [ShootnScoreIt.com](https://shootnscoreit.com)
-- Built for the IPSC shooting community
+- Built for the nordic IPSC community
