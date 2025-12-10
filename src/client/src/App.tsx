@@ -157,13 +157,43 @@ function App() {
     try {
       const baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : '/api';
       const response = await fetch(`${baseUrl}/${typeId}/${matchId}/${division}/parse`);
-      if (!response.ok) throw new Error('Failed to fetch data');
+      
+      if (!response.ok) {
+        // Try to parse error response for more details
+        let errorMessage = 'Failed to fetch data';
+        try {
+          const errorData = await response.json();
+          // Check if it's an SSI API timeout
+          if (response.status === 504 || errorData.ssiApiTimeout) {
+            errorMessage = errorData.message || errorData.error || 'The SSI (ShootnScoreIt) API timed out. The external service is responding slowly. Please try again in a moment.';
+          } else if (errorData.error) {
+            errorMessage = errorData.error;
+          } else if (errorData.message) {
+            errorMessage = errorData.message;
+          }
+        } catch {
+          // If we can't parse the error response, use status-based messages
+          if (response.status === 504) {
+            errorMessage = 'The SSI (ShootnScoreIt) API timed out. The external service is responding slowly. Please try again in a moment.';
+          } else if (response.status === 503) {
+            errorMessage = 'Service temporarily unavailable. Please try again in a moment.';
+          }
+        }
+        throw new Error(errorMessage);
+      }
+      
       const data = await response.json();
-
       const stagesWithMaxScores = calculateMaxPossibleScores(data);
       setStages(stagesWithMaxScores);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      // Handle network errors and other exceptions
+      if (err instanceof TypeError && err.message === 'Failed to fetch') {
+        setError('Network error: Unable to connect to the server. Please check your internet connection and try again.');
+      } else if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('An unexpected error occurred. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -209,7 +239,28 @@ function App() {
         headers: { 'Content-Type': 'text/plain' },
         body: ecmText
       });
-      if (!response.ok) throw new Error('Failed to parse ECM text');
+      
+      if (!response.ok) {
+        // Try to parse error response for more details
+        let errorMessage = 'Failed to parse ECM text';
+        try {
+          const errorData = await response.json();
+          if (errorData.error) {
+            errorMessage = errorData.error;
+          } else if (errorData.message) {
+            errorMessage = errorData.message;
+          }
+        } catch {
+          // If we can't parse the error response, use status-based messages
+          if (response.status === 504) {
+            errorMessage = 'Request timed out. Please try again.';
+          } else if (response.status === 503) {
+            errorMessage = 'Service temporarily unavailable. Please try again in a moment.';
+          }
+        }
+        throw new Error(errorMessage);
+      }
+      
       const data = await response.json();
       const stagesWithMaxScores = calculateMaxPossibleScores(data);
       setStages(stagesWithMaxScores);
@@ -219,7 +270,14 @@ function App() {
       setMatchId('');
       setDivision('hg18');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      // Handle network errors and other exceptions
+      if (err instanceof TypeError && err.message === 'Failed to fetch') {
+        setError('Network error: Unable to connect to the server. Please check your internet connection and try again.');
+      } else if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('An unexpected error occurred. Please try again.');
+      }
     } finally {
       setLoading(false);
     }

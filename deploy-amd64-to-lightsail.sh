@@ -20,6 +20,9 @@ ECR_REGISTRY_PREFIX="livescore"
 LIGHTSAIL_SERVICE_NAME=${LIGHTSAIL_SERVICE_NAME:-livescore-app}
 ESS_FEATURE_ENABLED=${ESS_FEATURE_ENABLED:-false}
 
+# Set AWS_DEFAULT_REGION to ensure AWS CLI uses the correct region
+export AWS_DEFAULT_REGION=$AWS_REGION
+
 echo -e "${GREEN}=== Build AMD64 Images and Deploy to Lightsail ===${NC}"
 echo ""
 

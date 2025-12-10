@@ -35,13 +35,16 @@ function evictOldestEntry(): void {
  * to implement timeout functionality.
  * 
  * @param url - The URL to fetch
- * @param timeoutMs - Timeout in milliseconds (default: 30000)
+ * @param timeoutMs - Timeout in milliseconds (default: 60000)
  * @returns Promise resolving to the Response from node-fetch
  * @throws FetchError if request times out or fails
  */
-async function fetchWithTimeout(url: string, timeoutMs: number = 30000): Promise<Response> {
+async function fetchWithTimeout(url: string, timeoutMs: number = 60000): Promise<Response> {
+  const startTime = Date.now();
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
+      const elapsed = Date.now() - startTime;
+      console.error(`[SSI API Timeout] Request to ${url} timed out after ${elapsed}ms (timeout: ${timeoutMs}ms)`);
       reject(new Error('Request timeout'));
     }, timeoutMs);
   });
@@ -51,11 +54,16 @@ async function fetchWithTimeout(url: string, timeoutMs: number = 30000): Promise
       fetch(url),
       timeoutPromise
     ]);
+    const elapsed = Date.now() - startTime;
+    console.log(`[SSI API] Successfully fetched ${url} in ${elapsed}ms`);
     return response;
   } catch (error) {
+    const elapsed = Date.now() - startTime;
     if (error instanceof Error && error.message === 'Request timeout') {
-      throw new FetchError(`Request timeout after ${timeoutMs}ms`, 504, error);
+      console.error(`[SSI API Timeout] Request to ${url} failed after ${elapsed}ms (timeout: ${timeoutMs}ms)`);
+      throw new FetchError(`SSI API request timed out after ${timeoutMs}ms. The external API is responding slowly.`, 504, error);
     }
+    console.error(`[SSI API Error] Request to ${url} failed after ${elapsed}ms: ${error instanceof Error ? error.message : String(error)}`);
     throw new FetchError(`Network error: ${error instanceof Error ? error.message : String(error)}`, 503, error);
   }
 }
@@ -89,29 +97,46 @@ export async function getCachedHtml(eventId: string, matchId: string, division: 
   
   if (cachedData && Date.now() - cachedData.timestamp < config.cacheTtl) {
     // Using cached HTML
+    const cacheAge = Date.now() - cachedData.timestamp;
+    console.log(`[Cache] Using cached HTML for ${cacheKey} (age: ${Math.round(cacheAge / 1000)}s)`);
     return cachedData.html;
   }
 
   // Fetching fresh HTML with timeout
   const url = buildSsiApiUrl(eventId, matchId, division);
-  const response = await fetchWithTimeout(url, config.fetchTimeout);
+  console.log(`[SSI API] Fetching fresh HTML from ${url} (timeout: ${config.fetchTimeout}ms)`);
+  const fetchStartTime = Date.now();
   
-  if (!response.ok) {
-    throw new FetchError(
-      `Failed to fetch HTML: ${response.status} ${response.statusText}`,
-      response.status
-    );
+  try {
+    const response = await fetchWithTimeout(url, config.fetchTimeout);
+    
+    if (!response.ok) {
+      const elapsed = Date.now() - fetchStartTime;
+      console.error(`[SSI API] Request to ${url} returned ${response.status} ${response.statusText} after ${elapsed}ms`);
+      throw new FetchError(
+        `Failed to fetch HTML: ${response.status} ${response.statusText}`,
+        response.status
+      );
+    }
+    
+    const html = await response.text();
+    const totalElapsed = Date.now() - fetchStartTime;
+    console.log(`[SSI API] Successfully fetched and parsed HTML from ${url} (total time: ${totalElapsed}ms, size: ${html.length} bytes)`);
+    
+    // Evict oldest entry if cache is full
+    evictOldestEntry();
+    
+    cache[cacheKey] = {
+      html,
+      timestamp: Date.now()
+    };
+    
+    return html;
+  } catch (error) {
+    const elapsed = Date.now() - fetchStartTime;
+    if (error instanceof FetchError && error.statusCode === 504) {
+      console.error(`[SSI API Timeout] Failed to fetch ${url} after ${elapsed}ms - timeout exceeded`);
+    }
+    throw error;
   }
-  
-  const html = await response.text();
-  
-  // Evict oldest entry if cache is full
-  evictOldestEntry();
-  
-  cache[cacheKey] = {
-    html,
-    timestamp: Date.now()
-  };
-  
-  return html;
 } 

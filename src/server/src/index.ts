@@ -93,16 +93,28 @@ app.get('/:matchType/:matchId/:division/parse', async (req, res) => {
     const stages = parseLivescore(html);
     res.json(stages);
   } catch (error) {
-    console.error('Error parsing livescore:', error);
-    
     if (error instanceof AppError) {
+      // Log timeout errors with more detail
+      if (error.statusCode === 504) {
+        console.error(`[SSI API Timeout] Request failed for matchType=${matchType}, matchId=${matchId}, division=${division}: ${error.message}`);
+      } else {
+        console.error(`[SSI API Error] Request failed for matchType=${matchType}, matchId=${matchId}, division=${division}: ${error.message}`);
+      }
+      
+      // Enhance error response for SSI API timeouts
+      const isSsiTimeout = error.statusCode === 504 && error.code === 'FETCH_ERROR';
       res.status(error.statusCode).json({
         error: error.message,
         code: error.code,
         timestamp: new Date().toISOString(),
+        ...(isSsiTimeout ? { 
+          ssiApiTimeout: true,
+          message: 'The SSI (ShootnScoreIt) API timed out. This usually means the external service is responding slowly. Please try again in a moment.'
+        } : {}),
         ...(process.env.NODE_ENV === 'development' && error.cause ? { details: String(error.cause) } : {})
       });
     } else {
+      console.error(`[Error] Unexpected error parsing livescore for matchType=${matchType}, matchId=${matchId}, division=${division}:`, error);
       res.status(500).json({ 
         error: 'Failed to parse livescore',
         code: 'INTERNAL_ERROR',
