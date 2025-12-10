@@ -98,9 +98,9 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
       
-      - name: Start Docker services
+      - name: Start Docker services with mock SSI API
         run: |
-          docker-compose up -d
+          MOCK_SSI_API=true docker-compose -f docker-compose.yml -f docker-compose.e2e.yml up -d
           # Wait for services to be ready
           timeout 60 bash -c 'until curl -f http://localhost/api/health; do sleep 2; done'
       
@@ -108,6 +108,7 @@ jobs:
         run: npm run test:e2e
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:80
+          MOCK_SSI_API: true
       
       - name: Upload Playwright report
         if: always()

@@ -1,0 +1,9 @@
+version: '3.8'
+
+# E2E test configuration - enables mock SSI API
+# Usage: MOCK_SSI_API=true docker-compose -f docker-compose.yml -f docker-compose.e2e.yml up -d
+
+services:
+  server:
+    environment:
+      - MOCK_SSI_API=true

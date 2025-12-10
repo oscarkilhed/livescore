@@ -5,6 +5,7 @@ import { parseECMTxt } from './parser';
 import { getCachedStages, __cache } from './cache';
 import { config } from './config';
 import { AppError, ValidationError, FeatureDisabledError, ParseError } from './errors';
+import { initializeMockSsiApi } from './mockSsiApi';
 
 /**
  * Express application instance.
@@ -230,8 +231,23 @@ app.get('/health', (req, res) => {
 
 // Only start server if not in test environment
 if (process.env.NODE_ENV !== 'test' && !process.env.JEST_WORKER_ID) {
-  app.listen(port, '0.0.0.0', () => {
-    // eslint-disable-next-line no-console
-    console.log(`Server running on port ${port}`);
-  });
+  // If mock mode is enabled, wait for initialization before starting server
+  const startServer = async () => {
+    if (process.env.MOCK_SSI_API === 'true' || process.env.MOCK_SSI_API === '1') {
+      try {
+        await initializeMockSsiApi();
+        console.log('[Server] Mock SSI API initialized');
+      } catch (error) {
+        console.error('[Server] Failed to initialize mock SSI API:', error);
+        process.exit(1);
+      }
+    }
+    
+    app.listen(port, '0.0.0.0', () => {
+      // eslint-disable-next-line no-console
+      console.log(`Server running on port ${port}`);
+    });
+  };
+  
+  startServer();
 } 

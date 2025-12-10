@@ -78,11 +78,28 @@ Tests are configured in `playwright.config.ts`:
 
 ## Mocking Strategy
 
-Tests use Playwright's route interception to mock API responses:
-- SSI API endpoints (`/api/:typeId/:matchId/:division/parse`)
-- ECM parsing endpoint (`/api/ecm/txt/parse`)
+Tests use a two-layer mocking approach:
+
+1. **Backend Mocking**: The backend server mocks the SSI API when `MOCK_SSI_API=true` is set:
+   - Uses `nock` to intercept all requests to `shootnscoreit.com`
+   - Returns mock HTML from test files (`src/server/test/livescore.html`)
+   - Prevents real API calls during e2e tests
+   - Enabled automatically when running `npm run test:e2e`
+
+2. **Frontend Mocking**: Playwright's route interception mocks API responses:
+   - SSI API endpoints (`/api/:typeId/:matchId/:division/parse`)
+   - ECM parsing endpoint (`/api/ecm/txt/parse`)
 
 This ensures tests run fast and reliably without depending on external services.
+
+### Enabling Mock SSI API
+
+The mock SSI API is automatically enabled when running e2e tests via Playwright config.
+To manually enable it:
+
+```bash
+MOCK_SSI_API=true docker-compose -f docker-compose.yml -f docker-compose.e2e.yml up -d
+```
 
 ## CI/CD Integration
 

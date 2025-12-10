@@ -3,6 +3,16 @@ import { config, buildSsiApiUrl } from './config';
 import { FetchError } from './errors';
 import parseLivescore from './parser';
 import { Stage } from './types';
+import { initializeMockSsiApi } from './mockSsiApi';
+
+// Initialize mock SSI API if enabled (for e2e tests)
+// This needs to happen synchronously before any imports that might trigger HTTP requests
+if (process.env.MOCK_SSI_API === 'true' || process.env.MOCK_SSI_API === '1') {
+  // Initialize asynchronously but don't wait - it will be ready before first request
+  initializeMockSsiApi().catch((error) => {
+    console.error('[Cache] Failed to initialize mock SSI API:', error);
+  });
+}
 
 /**
  * Maximum number of cached entries before eviction
