@@ -90,9 +90,16 @@ test.describe('SSI Flow', () => {
     const ssiTab = page.getByRole('button', { name: /SSI/i }).first();
     await expect(ssiTab).toBeVisible({ timeout: 10000 });
     
-    // Check that input fields are present
-    await expect(page.getByPlaceholder(/match id/i)).toBeVisible({ timeout: 5000 });
-    await expect(page.getByPlaceholder(/type id/i)).toBeVisible({ timeout: 5000 });
+    // Check that SSI URL input field is visible
+    await expect(page.getByPlaceholder(/paste shootnscoreit url/i)).toBeVisible({ timeout: 5000 });
+    
+    // Check that advanced options section exists but is collapsed (inputs hidden)
+    const advancedOptionsHeader = page.getByText('Advanced Options');
+    await expect(advancedOptionsHeader).toBeVisible({ timeout: 5000 });
+    
+    // Verify matchId and typeId inputs are hidden by default
+    await expect(page.getByPlaceholder(/match id/i)).not.toBeVisible();
+    await expect(page.getByPlaceholder(/type id/i)).not.toBeVisible();
   });
 
   test('should fetch and display live scores when form is submitted', async ({ page }) => {
@@ -182,6 +189,15 @@ test.describe('SSI Flow', () => {
   test('should update URL when form parameters change', async ({ page }) => {
     await page.goto('/');
     
+    // Wait for React app to load
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
+    
+    // Expand advanced options to access matchId and typeId inputs
+    const advancedOptionsHeader = page.getByText('Advanced Options');
+    await advancedOptionsHeader.click();
+    await page.waitForTimeout(300);
+    
     // Fill in form fields
     await page.getByPlaceholder(/match id/i).fill('12345');
     await page.getByPlaceholder(/type id/i).fill('22');
@@ -198,11 +214,61 @@ test.describe('SSI Flow', () => {
   test('should load state from URL parameters on page load', async ({ page }) => {
     await page.goto('/?matchId=21833&typeId=22&division=hg18');
     
-    // Verify form fields are populated from URL
+    // Wait for React app to load
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
+    
+    // Verify SSI URL is populated from URL parameters
+    const ssiUrlInput = page.getByPlaceholder(/paste shootnscoreit url/i);
+    await expect(ssiUrlInput).toHaveValue('https://shootnscoreit.com/event/22/21833/live-scores/');
+    
+    // Verify advanced options section exists and is collapsed by default
+    const advancedOptionsHeader = page.getByText('Advanced Options');
+    await expect(advancedOptionsHeader).toBeVisible();
+    
+    // Verify matchId and typeId inputs are hidden (in collapsed advanced options)
     const matchIdInput = page.getByPlaceholder(/match id/i);
+    const typeIdInput = page.getByPlaceholder(/type id/i);
+    
+    // These should not be visible initially (advanced options collapsed)
+    await expect(matchIdInput).not.toBeVisible();
+    await expect(typeIdInput).not.toBeVisible();
+    
+    // Expand advanced options
+    await advancedOptionsHeader.click();
+    await page.waitForTimeout(300);
+    
+    // Now verify form fields are populated from URL
+    await expect(matchIdInput).toBeVisible();
     await expect(matchIdInput).toHaveValue('21833');
     
-    const typeIdInput = page.getByPlaceholder(/type id/i);
+    await expect(typeIdInput).toBeVisible();
     await expect(typeIdInput).toHaveValue('22');
+  });
+
+  test('should populate SSI URL from matchId and typeId URL parameters', async ({ page }) => {
+    await page.goto('/?matchId=12345&typeId=99&division=hg18');
+    
+    // Wait for React app to load
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
+    
+    // Verify SSI URL input is populated with constructed URL
+    const ssiUrlInput = page.getByPlaceholder(/paste shootnscoreit url/i);
+    await expect(ssiUrlInput).toBeVisible();
+    await expect(ssiUrlInput).toHaveValue('https://shootnscoreit.com/event/99/12345/live-scores/');
+  });
+
+  test('should not populate SSI URL when matchId or typeId are missing', async ({ page }) => {
+    await page.goto('/?division=hg18');
+    
+    // Wait for React app to load
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
+    
+    // Verify SSI URL input is empty when parameters are missing
+    const ssiUrlInput = page.getByPlaceholder(/paste shootnscoreit url/i);
+    await expect(ssiUrlInput).toBeVisible();
+    await expect(ssiUrlInput).toHaveValue('');
   });
 });

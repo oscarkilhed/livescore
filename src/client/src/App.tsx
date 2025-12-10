@@ -29,6 +29,7 @@ function App() {
   const [matchId, setMatchId] = useState('');
   const [typeId, setTypeId] = useState('');
   const [division, setDivision] = useState('all');
+  const [ssiUrl, setSsiUrl] = useState('');
   const [selectedCompetitors, setSelectedCompetitors] = useState<string[]>([]);
   const [comparison, setComparison] = useState<CompetitorWithTotalScore[]>([]);
   const [scores, setScores] = useState<CompetitorWithTotalScore[]>([]);
@@ -41,6 +42,7 @@ function App() {
   const [expandedStageCompetitors, setExpandedStageCompetitors] = useState<Record<number, string[]>>({});
   const stageHeaderRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const [selectedCategory, setSelectedCategory] = useState<string>('Overall');
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
 
   // Ensure activeTab is valid based on feature flags
   useEffect(() => {
@@ -70,6 +72,12 @@ function App() {
         .map(n => parseInt(n, 10))
         .filter(n => !Number.isNaN(n));
       setExcludedStages(parsed);
+    }
+
+    // If we have matchId and typeId, construct and populate the SSI URL
+    if (urlMatchId && urlTypeId) {
+      const constructedUrl = `https://shootnscoreit.com/event/${urlTypeId}/${urlMatchId}/live-scores/`;
+      setSsiUrl(constructedUrl);
     }
 
     // If we have all required parameters, set shouldFetch to true
@@ -489,20 +497,51 @@ function App() {
               <input
                 type="text"
                 placeholder="Paste ShootnScoreIt URL (e.g., https://shootnscoreit.com/event/22/21833/live-scores/)"
-                onChange={(e) => handleUrlPaste(e.target.value)}
+                value={ssiUrl}
+                onChange={(e) => {
+                  setSsiUrl(e.target.value);
+                  handleUrlPaste(e.target.value);
+                }}
               />
-              <input
-                type="text"
-                placeholder="Type ID"
-                value={typeId}
-                onChange={(e) => setTypeId(e.target.value)}
-              />
-              <input
-                type="text"
-                placeholder="Match ID"
-                value={matchId}
-                onChange={(e) => setMatchId(e.target.value)}
-              />
+              <div className="advanced-options-section">
+                <div
+                  className="advanced-options-header"
+                  onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
+                  style={{ 
+                    cursor: 'pointer', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '6px', 
+                    padding: '0.25rem 0', 
+                    marginTop: '0.25rem',
+                    fontSize: '0.875rem',
+                    color: '#6c757d'
+                  }}
+                >
+                  <FontAwesomeIcon 
+                    icon={faChevronDown} 
+                    className={`chevron ${showAdvancedOptions ? 'open' : ''}`}
+                    style={{ fontSize: '0.75rem', opacity: 0.7 }}
+                  />
+                  <span style={{ fontWeight: 400 }}>Advanced Options</span>
+                </div>
+                {showAdvancedOptions && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
+                    <input
+                      type="text"
+                      placeholder="Type ID"
+                      value={typeId}
+                      onChange={(e) => setTypeId(e.target.value)}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Match ID"
+                      value={matchId}
+                      onChange={(e) => setMatchId(e.target.value)}
+                    />
+                  </div>
+                )}
+              </div>
               <select
                 value={division}
                 onChange={(e) => setDivision(e.target.value)}
