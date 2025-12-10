@@ -147,7 +147,7 @@ Or use the AWS Console to update the container service deployment.
 - `NODE_ENV`: `production`
 - `PORT`: `3000`
 - `ESS_FEATURE_ENABLED`: `false` or `true`
-- `FETCH_TIMEOUT`: `60000` (optional, milliseconds, default: 60 seconds)
+- `FETCH_TIMEOUT`: `120000` (optional, milliseconds, default: 120 seconds / 2 minutes)
 
 ### Client Container
 

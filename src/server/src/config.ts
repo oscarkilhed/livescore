@@ -37,7 +37,7 @@ const getConfig = (): ServerConfig => {
     cacheTtl: parseInt(process.env.CACHE_TTL || '300000', 10), // Default 5 minutes
     nodeEnv,
     essFeatureEnabled: process.env.ESS_FEATURE_ENABLED === 'true' || process.env.ESS_FEATURE_ENABLED === '1',
-    fetchTimeout: parseInt(process.env.FETCH_TIMEOUT || '60000', 10), // Default 60 seconds
+    fetchTimeout: parseInt(process.env.FETCH_TIMEOUT || '120000', 10), // Default 120 seconds (2 minutes)
   };
   
   // Validate configuration (skip in test environment to allow flexibility)

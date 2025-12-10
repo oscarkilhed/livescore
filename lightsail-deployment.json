@@ -19,7 +19,7 @@
         "NODE_ENV": "production",
         "PORT": "3000",
         "ESS_FEATURE_ENABLED": "false",
-        "FETCH_TIMEOUT": "60000"
+        "FETCH_TIMEOUT": "120000"
       }
     }
   },

@@ -90,7 +90,10 @@ app.get('/:matchType/:matchId/:division/parse', async (req, res) => {
 
   try {
     const html = await getCachedHtml(matchType.toString(), matchId.toString(), division.toString());
+    const parseStartTime = Date.now();
     const stages = parseLivescore(html);
+    const parseElapsed = Date.now() - parseStartTime;
+    console.log(`[Parse] Successfully parsed livescore for matchType=${matchType}, matchId=${matchId}, division=${division} in ${parseElapsed}ms (${stages.length} stages)`);
     res.json(stages);
   } catch (error) {
     if (error instanceof AppError) {
@@ -177,7 +180,10 @@ app.post('/ecm/txt/parse', express.text({ type: '*/*', limit: '20mb' }), async (
       });
     }
 
+    const parseStartTime = Date.now();
     const stages = parseECMTxt(bodyText);
+    const parseElapsed = Date.now() - parseStartTime;
+    console.log(`[Parse] Successfully parsed ECM text in ${parseElapsed}ms (${stages.length} stages, body size: ${sizeInMB.toFixed(2)}MB)`);
     return res.json(stages);
   } catch (error) {
     console.error('Error parsing ECM text payload:', error);
