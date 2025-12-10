@@ -29,15 +29,33 @@ if ! command -v aws &> /dev/null; then
     exit 1
 fi
 
+# Verify AWS credentials are configured
+echo -e "${YELLOW}Verifying AWS credentials...${NC}"
+if ! aws sts get-caller-identity &>/dev/null; then
+    echo -e "${RED}Error: AWS credentials are not configured or invalid${NC}"
+    echo "Please configure AWS credentials using one of these methods:"
+    echo "  1. Run 'aws configure'"
+    echo "  2. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables"
+    echo "  3. Use an IAM role (if running on EC2/Lambda)"
+    exit 1
+fi
+
 # Get AWS account ID if not provided
 if [ -z "$AWS_ACCOUNT_ID" ]; then
-    echo "Getting AWS account ID..."
-    AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "")
-    if [ -z "$AWS_ACCOUNT_ID" ]; then
-        echo -e "${RED}Error: Could not determine AWS account ID. Please set AWS_ACCOUNT_ID environment variable or configure AWS credentials.${NC}"
+    echo -e "${YELLOW}Getting AWS account ID from AWS CLI...${NC}"
+    AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>&1)
+    if [ $? -ne 0 ] || [ -z "$AWS_ACCOUNT_ID" ]; then
+        echo -e "${RED}Error: Could not determine AWS account ID${NC}"
+        echo "Error details: $AWS_ACCOUNT_ID"
+        echo ""
+        echo "Please either:"
+        echo "  1. Set AWS_ACCOUNT_ID environment variable: export AWS_ACCOUNT_ID=123456789012"
+        echo "  2. Ensure AWS credentials are properly configured: aws configure"
         exit 1
     fi
     echo -e "${GREEN}Found AWS Account ID: ${AWS_ACCOUNT_ID}${NC}"
+else
+    echo -e "${GREEN}Using provided AWS Account ID: ${AWS_ACCOUNT_ID}${NC}"
 fi
 
 # Set AWS region
