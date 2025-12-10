@@ -1,0 +1,39 @@
+version: '3.8'
+
+# Development docker-compose with React dev server
+# Use this for local development with hot reload
+
+services:
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+      args:
+        REACT_APP_FEATURE_FLAG_ESS_FEATURE: ${ESS_FEATURE_ENABLED:-false}
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+    networks:
+      - app-network
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - ESS_FEATURE_ENABLED=${ESS_FEATURE_ENABLED:-false}
+    volumes:
+      - ./src/server/src:/app/src
+      - ./src/server/package.json:/app/package.json
+    command: npm run dev || npm start
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

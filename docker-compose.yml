@@ -1,0 +1,41 @@
+version: '3.8'
+
+# Production-like local setup (matches Lightsail deployment)
+# For hot-reload development, use: cd src/client && npm start
+
+services:
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+      args:
+        REACT_APP_FEATURE_FLAG_ESS_FEATURE: ${ESS_FEATURE_ENABLED:-false}
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+    networks:
+      - app-network
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - ESS_FEATURE_ENABLED=${ESS_FEATURE_ENABLED:-false}
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge 

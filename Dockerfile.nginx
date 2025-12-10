@@ -1,0 +1,20 @@
+# Build React app
+FROM node:24-alpine as builder
+WORKDIR /app
+COPY src/client/ ./
+RUN npm install
+# Build args for feature flags (defaults to false if not provided)
+ARG REACT_APP_FEATURE_FLAG_ESS_FEATURE=false
+ENV REACT_APP_FEATURE_FLAG_ESS_FEATURE=${REACT_APP_FEATURE_FLAG_ESS_FEATURE}
+RUN npm run build
+
+# Production nginx with React app and API proxy
+FROM nginx:alpine
+# Copy React build to nginx html directory
+COPY --from=builder /app/build /usr/share/nginx/html
+# Remove default nginx configs to avoid conflicts
+RUN rm -rf /etc/nginx/conf.d/*
+# Copy nginx configuration (replaces main config)
+COPY nginx.conf /etc/nginx/nginx.conf
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

@@ -1,0 +1,38 @@
+{
+  "containers": {
+    "nginx": {
+      "image": "ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/livescore-nginx:latest",
+      "ports": {
+        "80": "HTTP"
+      },
+      "environment": {
+        "REACT_APP_FEATURE_FLAG_ESS_FEATURE": "false",
+        "API": "service://localhost:3000"
+      }
+    },
+    "api": {
+      "image": "ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/livescore-server:latest",
+      "ports": {
+        "3000": "HTTP"
+      },
+      "environment": {
+        "NODE_ENV": "production",
+        "PORT": "3000",
+        "ESS_FEATURE_ENABLED": "false",
+        "FETCH_TIMEOUT": "15000"
+      }
+    }
+  },
+  "publicEndpoint": {
+    "containerName": "nginx",
+    "containerPort": 80,
+    "healthCheck": {
+      "healthyThreshold": 2,
+      "unhealthyThreshold": 5,
+      "timeoutSeconds": 10,
+      "intervalSeconds": 30,
+      "path": "/health",
+      "successCodes": "200"
+    }
+  }
+}
