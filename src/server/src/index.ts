@@ -84,7 +84,7 @@ app.get('/:matchType/:matchId/:division/parse', async (req, res) => {
   }
 
   // Validate division format
-  const validDivisions = ['all', 'hg1', 'hg2', 'hg3', 'hg5', 'hg12', 'hg18'];
+  const validDivisions = ['all', 'hg1', 'hg2', 'hg3', 'hg5', 'hg12', 'hg17', 'hg18', 'hg33'];
   if (division !== 'all' && !validDivisions.includes(division)) {
     return res.status(400).json({ 
       error: `Invalid division code. Valid values: ${validDivisions.join(', ')}`,

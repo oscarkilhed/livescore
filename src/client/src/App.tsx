@@ -19,7 +19,9 @@ const DIVISIONS: Division[] = [
   { value: 'hg3', label: 'Production' },
   { value: 'hg5', label: 'Revolver' },
   { value: 'hg12', label: 'Classic' },
-  { value: 'hg18', label: 'Production Optics' }
+  { value: 'hg17', label: 'Pistol Caliber Carbine' },
+  { value: 'hg18', label: 'Production Optics' },
+  { value: 'hg33', label: 'Optics' }
 ];
 
 function App() {

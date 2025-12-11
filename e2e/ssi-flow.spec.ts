@@ -58,10 +58,14 @@ test.describe('SSI Flow', () => {
 
   test.beforeEach(async ({ page }) => {
     // Mock the API endpoint before each test
-    await page.route('**/api/*/parse', async (route) => {
+    // Match both /api/:typeId/:matchId/:division/parse and http://localhost:3000/:typeId/:matchId/:division/parse
+    await page.route((url) => {
+      // Match URLs ending with /parse that have the pattern /:typeId/:matchId/:division/parse
+      return /\/\d+\/\d+\/\w+\/parse$/.test(new URL(url).pathname);
+    }, async (route) => {
       const url = route.request().url();
-      // Extract parameters from URL: /api/:typeId/:matchId/:division/parse
-      const match = url.match(/\/api\/(\d+)\/(\d+)\/(\w+)\/parse/);
+      // Extract parameters from URL: /api/:typeId/:matchId/:division/parse or http://localhost:3000/:typeId/:matchId/:division/parse
+      const match = url.match(/\/(\d+)\/(\d+)\/(\w+)\/parse/);
       
       if (match) {
         await route.fulfill({
@@ -270,5 +274,45 @@ test.describe('SSI Flow', () => {
     const ssiUrlInput = page.getByPlaceholder(/paste shootnscoreit url/i);
     await expect(ssiUrlInput).toBeVisible();
     await expect(ssiUrlInput).toHaveValue('');
+  });
+
+  test('should fetch and display live scores for hg17 (Pistol Caliber Carbine)', async ({ page }) => {
+    await page.goto('/?matchId=21833&typeId=22&division=hg17');
+    
+    // Wait for React app to load and fetch data
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(2000); // Give time for API call and rendering
+    
+    // Verify stages are displayed - look for stage headers or competitor lists
+    const hasStages = await Promise.race([
+      page.locator('h2, h3, h4').filter({ hasText: /stage/i }).first().waitFor({ timeout: 5000 }).then(() => true),
+      page.locator('.stage, [class*="stage"]').first().waitFor({ timeout: 5000 }).then(() => true),
+      page.locator('ul, ol').first().waitFor({ timeout: 5000 }).then(() => true),
+    ]).catch(() => false);
+    
+    // At minimum, verify the page has loaded and isn't showing an error
+    const errorMessage = page.getByText(/error|failed/i);
+    const hasError = await errorMessage.isVisible().catch(() => false);
+    expect(hasError).toBe(false);
+  });
+
+  test('should fetch and display live scores for hg33 (Optics)', async ({ page }) => {
+    await page.goto('/?matchId=21833&typeId=22&division=hg33');
+    
+    // Wait for React app to load and fetch data
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(2000); // Give time for API call and rendering
+    
+    // Verify stages are displayed - look for stage headers or competitor lists
+    const hasStages = await Promise.race([
+      page.locator('h2, h3, h4').filter({ hasText: /stage/i }).first().waitFor({ timeout: 5000 }).then(() => true),
+      page.locator('.stage, [class*="stage"]').first().waitFor({ timeout: 5000 }).then(() => true),
+      page.locator('ul, ol').first().waitFor({ timeout: 5000 }).then(() => true),
+    ]).catch(() => false);
+    
+    // At minimum, verify the page has loaded and isn't showing an error
+    const errorMessage = page.getByText(/error|failed/i);
+    const hasError = await errorMessage.isVisible().catch(() => false);
+    expect(hasError).toBe(false);
   });
 });

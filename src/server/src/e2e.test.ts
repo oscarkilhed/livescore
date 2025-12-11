@@ -152,6 +152,58 @@ describe('E2E API Tests with Mocked SSI API', () => {
       // Verify responses are identical (indicating cache was used)
       expect(JSON.stringify(response1.body)).toBe(JSON.stringify(response2.body));
     });
+
+    it('should fetch and parse SSI live scores successfully for hg17 (Pistol Caliber Carbine)', async () => {
+      const matchType = '22';
+      const matchId = '21833';
+      const division = 'hg17';
+
+      // Mock SSI API response
+      nock('https://shootnscoreit.com')
+        .get(`/event/${matchType}/${matchId}/live-scores/`)
+        .query({ divShown: division })
+        .reply(200, mockHtml);
+
+      const response = await request(app)
+        .get(`/${matchType}/${matchId}/${division}/parse`)
+        .expect(200);
+
+      expect(response.body).toBeInstanceOf(Array);
+      expect(response.body.length).toBeGreaterThan(0);
+
+      // Verify stage structure
+      const stage = response.body[0];
+      expect(stage).toHaveProperty('stage');
+      expect(stage).toHaveProperty('competitors');
+      expect(stage).toHaveProperty('procedures');
+      expect(Array.isArray(stage.competitors)).toBe(true);
+    });
+
+    it('should fetch and parse SSI live scores successfully for hg33 (Optics)', async () => {
+      const matchType = '22';
+      const matchId = '21833';
+      const division = 'hg33';
+
+      // Mock SSI API response
+      nock('https://shootnscoreit.com')
+        .get(`/event/${matchType}/${matchId}/live-scores/`)
+        .query({ divShown: division })
+        .reply(200, mockHtml);
+
+      const response = await request(app)
+        .get(`/${matchType}/${matchId}/${division}/parse`)
+        .expect(200);
+
+      expect(response.body).toBeInstanceOf(Array);
+      expect(response.body.length).toBeGreaterThan(0);
+
+      // Verify stage structure
+      const stage = response.body[0];
+      expect(stage).toHaveProperty('stage');
+      expect(stage).toHaveProperty('competitors');
+      expect(stage).toHaveProperty('procedures');
+      expect(Array.isArray(stage.competitors)).toBe(true);
+    });
   });
 
   describe('POST /ecm/txt/parse', () => {

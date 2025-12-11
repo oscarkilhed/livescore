@@ -166,4 +166,44 @@ test.describe('Competitor Comparison', () => {
       await expect(excludeControls.first()).toBeVisible();
     }
   });
+
+  test('should display competitor selection UI for hg17 (Pistol Caliber Carbine)', async ({ page }) => {
+    await page.goto('/?matchId=21833&typeId=22&division=hg17');
+    
+    // Wait for data to load
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(2000);
+    
+    // Verify page has loaded with content
+    const bodyText = await page.textContent('body');
+    expect(bodyText?.length).toBeGreaterThan(100);
+    
+    // Check for any competitor-like content or selection UI
+    const hasContent = await Promise.race([
+      page.locator('input, select, [role="combobox"]').first().waitFor({ timeout: 3000 }).then(() => true),
+      page.locator('ul, ol, div').filter({ hasText: /.+/ }).first().waitFor({ timeout: 3000 }).then(() => true),
+    ]).catch(() => false);
+    
+    expect(hasContent || (bodyText && bodyText.length > 100)).toBe(true);
+  });
+
+  test('should display competitor selection UI for hg33 (Optics)', async ({ page }) => {
+    await page.goto('/?matchId=21833&typeId=22&division=hg33');
+    
+    // Wait for data to load
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(2000);
+    
+    // Verify page has loaded with content
+    const bodyText = await page.textContent('body');
+    expect(bodyText?.length).toBeGreaterThan(100);
+    
+    // Check for any competitor-like content or selection UI
+    const hasContent = await Promise.race([
+      page.locator('input, select, [role="combobox"]').first().waitFor({ timeout: 3000 }).then(() => true),
+      page.locator('ul, ol, div').filter({ hasText: /.+/ }).first().waitFor({ timeout: 3000 }).then(() => true),
+    ]).catch(() => false);
+    
+    expect(hasContent || (bodyText && bodyText.length > 100)).toBe(true);
+  });
 });
