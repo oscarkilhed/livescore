@@ -291,12 +291,13 @@ export function transformScorecard(scorecard: GraphQLScorecard): Competitor {
   // Map GraphQL hit scores to Hits interface
   // Note: bscore -> NS (No Shoot), hscore -> M (Misses)
   // This mapping may need verification with actual data
+  // Parse as numbers to handle potential string values from GraphQL
   const hits: Hits = {
-    A: scorecard.ascore || 0,
-    C: scorecard.cscore || 0,
-    D: scorecard.dscore || 0,
-    M: scorecard.hscore || 0,  // H score = Misses
-    NS: scorecard.bscore || 0, // B score = No Shoots
+    A: Number(scorecard.ascore) || 0,
+    C: Number(scorecard.cscore) || 0,
+    D: Number(scorecard.dscore) || 0,
+    M: Number(scorecard.hscore) || 0,  // H score = Misses
+    NS: Number(scorecard.bscore) || 0, // B score = No Shoots
   };
   
   return {
@@ -304,9 +305,9 @@ export function transformScorecard(scorecard: GraphQLScorecard): Competitor {
     division: displayDivision,
     powerFactor,
     category: competitor.category,
-    hitFactor: scorecard.hitfactor || 0,
-    time: scorecard.time || 0,
-    points: scorecard.points || 0,
+    hitFactor: Number(scorecard.hitfactor) || 0,
+    time: Number(scorecard.time) || 0,
+    points: Number(scorecard.points) || 0,
     hits,
     competitorKey: competitor.number ? String(competitor.number) : `${fullName}|${displayDivision}`,
   };

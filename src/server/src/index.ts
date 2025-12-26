@@ -77,7 +77,8 @@ const port = config.port;
 
 // Trust proxy - required when behind nginx reverse proxy
 // This allows Express to correctly identify client IPs from X-Forwarded-For header
-app.set('trust proxy', true);
+// Using 1 to trust only the first proxy (nginx) instead of true which is too permissive
+app.set('trust proxy', 1);
 
 // Enable CORS for all routes
 app.use(cors());
