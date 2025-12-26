@@ -24,6 +24,28 @@ const DIVISIONS: Division[] = [
   { value: 'hg33', label: 'Optics' }
 ];
 
+/**
+ * Category code to display name mapping
+ * Based on IPSC category codes from SSI GraphQL API
+ */
+const CATEGORY_DISPLAY_MAP: Record<string, string> = {
+  '-': 'None',
+  'L': 'Lady',
+  'LS': 'Lady Senior',
+  'SJ': 'Super Junior',
+  'J': 'Junior',
+  'S': 'Senior',
+  'SS': 'Super Senior',
+  'GS': 'Grand Senior',
+};
+
+/**
+ * Get the display name for a category code
+ */
+const getCategoryDisplayName = (code: string): string => {
+  return CATEGORY_DISPLAY_MAP[code] || code;
+};
+
 function App() {
   const [stages, setStages] = useState<Array<Stage>>([]);
   const essFeatureEnabled = isFeatureEnabled('ESS_FEATURE');
@@ -61,6 +83,7 @@ function App() {
     const urlDivision = params.get('division');
     const urlCompetitors = params.get('competitors');
     const urlExclude = params.get('exclude');
+    const urlCategory = params.get('category');
     
     if (urlMatchId) setMatchId(urlMatchId);
     if (urlTypeId) setTypeId(urlTypeId);
@@ -75,6 +98,7 @@ function App() {
         .filter(n => !Number.isNaN(n));
       setExcludedStages(parsed);
     }
+    if (urlCategory) setSelectedCategory(urlCategory);
 
     // If we have matchId and typeId, construct and populate the SSI URL
     if (urlMatchId && urlTypeId) {
@@ -90,7 +114,7 @@ function App() {
 
   
 
-  // Update URL when matchId, typeId, division, selectedCompetitors, or excludedStages change
+  // Update URL when matchId, typeId, division, selectedCompetitors, excludedStages, or category change
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (matchId) params.set('matchId', matchId);
@@ -106,10 +130,15 @@ function App() {
     } else {
       params.delete('exclude');
     }
+    if (selectedCategory && selectedCategory !== 'Overall') {
+      params.set('category', selectedCategory);
+    } else {
+      params.delete('category');
+    }
     
     const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
     window.history.replaceState({}, '', newUrl);
-  }, [matchId, typeId, division, selectedCompetitors, excludedStages]);
+  }, [matchId, typeId, division, selectedCompetitors, excludedStages, selectedCategory]);
 
   const getCommonStages = (competitors: CompetitorWithTotalScore[]): number[] => {
     if (competitors.length === 0) return [];
@@ -567,6 +596,17 @@ function App() {
                   </option>
                 ))}
               </select>
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="division-select"
+                title="Filter by competitor category"
+              >
+                <option value="Overall">Overall</option>
+                {availableCategories.map(cat => (
+                  <option key={cat} value={cat}>{getCategoryDisplayName(cat)}</option>
+                ))}
+              </select>
                 <button type="submit" disabled={loading}>
                   {loading ? 'Loading...' : 'Get Scores'}
                 </button>
@@ -598,7 +638,7 @@ function App() {
             >
               <option value="Overall">Overall</option>
               {availableCategories.map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
+                <option key={cat} value={cat}>{getCategoryDisplayName(cat)}</option>
               ))}
             </select>
           </div>

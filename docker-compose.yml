@@ -33,6 +33,7 @@ services:
       - GRAPHQL_CACHE_MAX_AGE_MS=${GRAPHQL_CACHE_MAX_AGE_MS:-259200000}
       - GRAPHQL_CACHE_IDLE_EVICTION_MS=${GRAPHQL_CACHE_IDLE_EVICTION_MS:-3600000}
       - RESPONSE_CACHE_TTL_MS=${RESPONSE_CACHE_TTL_MS:-5000}
+      - RATE_LIMIT_ENABLED=false
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
       interval: 30s

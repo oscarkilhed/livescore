@@ -87,11 +87,11 @@ app.use(express.json());
 
 /**
  * Rate limiting middleware
- * Limits each IP to 100 requests per 15 minutes
+ * Configurable via RATE_LIMIT_ENABLED, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX env vars
  */
 const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: config.rateLimitWindowMs,
+  max: config.rateLimitMax,
   message: {
     error: 'Too many requests from this IP, please try again later',
     code: 'RATE_LIMIT_EXCEEDED',
@@ -101,8 +101,8 @@ const apiLimiter = rateLimit({
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
 });
 
-// Apply rate limiting to API routes (skip in test environment)
-if (process.env.NODE_ENV !== 'test') {
+// Apply rate limiting to API routes (skip in test environment or when disabled via config)
+if (config.rateLimitEnabled && process.env.NODE_ENV !== 'test') {
   app.use('/api/', apiLimiter);
   app.use('/:matchType/:matchId/:division/parse', apiLimiter);
   app.use('/ecm/txt/parse', apiLimiter);

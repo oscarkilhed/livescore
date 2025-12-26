@@ -130,7 +130,12 @@ function calculateScoresForStages(stages: Stage[], category?: string): Competito
 
     stages.forEach(stage => {
         const maxPossibleScore = stage.maxPossibleScore || 0;
-        const validHitFactors = stage.competitors
+        // Filter competitors by category before calculating maxHitFactor
+        // This ensures category-specific rankings (e.g., top Senior gets 100% in Senior category)
+        const categoryCompetitors = category 
+            ? stage.competitors.filter(c => c.category === category)
+            : stage.competitors;
+        const validHitFactors = categoryCompetitors
             .map(c => c.hitFactor)
             .filter(hf => hf && hf > 0);
         const maxHitFactor = validHitFactors.length > 0 ? Math.max(...validHitFactors) : 0;
