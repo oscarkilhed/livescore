@@ -29,7 +29,10 @@ services:
       - NODE_ENV=production
       - PORT=3000
       - ESS_FEATURE_ENABLED=${ESS_FEATURE_ENABLED:-false}
-      - MOCK_SSI_API=${MOCK_SSI_API:-false}
+      - GRAPHQL_TIMEOUT=${GRAPHQL_TIMEOUT:-60000}
+      - GRAPHQL_CACHE_MAX_AGE_MS=${GRAPHQL_CACHE_MAX_AGE_MS:-259200000}
+      - GRAPHQL_CACHE_IDLE_EVICTION_MS=${GRAPHQL_CACHE_IDLE_EVICTION_MS:-3600000}
+      - RESPONSE_CACHE_TTL_MS=${RESPONSE_CACHE_TTL_MS:-5000}
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
       interval: 30s
@@ -41,4 +44,4 @@ services:
 
 networks:
   app-network:
-    driver: bridge 
+    driver: bridge

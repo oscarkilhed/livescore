@@ -57,3 +57,16 @@ export class FeatureDisabledError extends AppError {
     super(`Feature '${featureName}' is disabled`, 'FEATURE_DISABLED', 403);
   }
 }
+
+/**
+ * Error thrown when GraphQL API request fails
+ */
+export class GraphQLError extends AppError {
+  constructor(
+    message: string,
+    public readonly statusCode: number = 500,
+    cause?: unknown
+  ) {
+    super(message, 'GRAPHQL_ERROR', statusCode, cause);
+  }
+}

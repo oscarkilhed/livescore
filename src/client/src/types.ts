@@ -21,6 +21,7 @@ export interface Competitor {
 
 export interface Stage {
     stage: number;
+    stageName?: string;
     competitors: Competitor[];
     maxPossibleScore?: number;
     procedures: number;
@@ -28,6 +29,7 @@ export interface Stage {
 
 export interface StageScore {
     stage: number;
+    stageName?: string;
     score: number;
     maxPossibleScore: number;
     hits: Hits;

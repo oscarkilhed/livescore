@@ -47,11 +47,12 @@ export function calculateMaxPossibleScores(stages: Stage[]): Stage[] {
  * @param stageNumber - The stage number
  * @returns StageScore object with calculated score, procedures, and other data
  */
-function calculateStageScore(competitor: Competitor, maxHitFactor: number, maxPossibleScore: number, stageNumber: number): StageScore {
+function calculateStageScore(competitor: Competitor, maxHitFactor: number, maxPossibleScore: number, stageNumber: number, stageName?: string): StageScore {
     // Handle cases where there are no valid hit factors (e.g., empty stage)
     if (!maxHitFactor || maxHitFactor <= 0) {
         return {
             stage: stageNumber,
+            stageName: stageName || `Stage ${stageNumber}`,
             score: 0,
             hits: competitor.hits,
             points: competitor.points || 0,
@@ -68,6 +69,7 @@ function calculateStageScore(competitor: Competitor, maxHitFactor: number, maxPo
 
     return {
         stage: stageNumber,
+        stageName: stageName || `Stage ${stageNumber}`,
         score: stageScore,
         hits: competitor.hits,
         points: competitor.points || 0,
@@ -139,7 +141,7 @@ function calculateScoresForStages(stages: Stage[], category?: string): Competito
                 const key = competitor.competitorKey;
                 const competitorData = competitorMap.get(key);
                 if (!competitorData) return;
-                const stageScore = calculateStageScore(competitor, maxHitFactor, maxPossibleScore, stage.stage);
+                const stageScore = calculateStageScore(competitor, maxHitFactor, maxPossibleScore, stage.stage, stage.stageName);
                 competitorData.stageScores.push(stageScore);
                 competitorData.totalScore += stageScore.score;
             });

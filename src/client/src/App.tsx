@@ -357,7 +357,7 @@ function App() {
           return (
             <div key={stageScore.stage} className="stage">
               <div className="stage-header">
-                <h4>Stage {stageScore.stage}</h4>
+                <h4>{stageScore.stageName || `Stage ${stageScore.stage}`}</h4>
                 <div>
                   Score: <div className="stage-score">{(stageScore.score ?? 0).toFixed(2)} / {stageScore.maxPossibleScore ? (stageScore.maxPossibleScore).toFixed(2) : 'Unknown'}</div>
                 </div>
@@ -427,8 +427,20 @@ function App() {
   }, [stages, selectedCompetitors, excludedStages, selectedCategory]);
 
   const availableStageNumbers = Array.from(new Set(stages.map(s => s.stage))).sort((a, b) => a - b);
+  // Build a map of stage number to stage name for use in the UI
+  const stageNameMap = useMemo(() => {
+    const map = new Map<number, string>();
+    stages.forEach(s => {
+      map.set(s.stage, s.stageName || `Stage ${s.stage}`);
+    });
+    return map;
+  }, [stages]);
+
   type StageOption = { value: number; label: string };
-  const stageOptions: StageOption[] = availableStageNumbers.map(num => ({ value: num, label: `Stage ${num}` }));
+  const stageOptions: StageOption[] = availableStageNumbers.map(num => ({ 
+    value: num, 
+    label: stageNameMap.get(num) || `Stage ${num}` 
+  }));
   const selectedStageOptions: StageOption[] = stageOptions.filter(o => excludedStages.includes(o.value));
   const handleExcludedStagesChange = (opts: MultiValue<StageOption>) => {
     setExcludedStages(opts.map(o => o.value));
@@ -691,7 +703,7 @@ function App() {
                   style={{ cursor: 'pointer' }}
                   ref={(el) => { stageHeaderRefs.current[stageNum] = el; }}
                 >
-                  <h3>Stage {stageNum}</h3>
+                  <h3>{stageNameMap.get(stageNum) || `Stage ${stageNum}`}</h3>
                   <div>
                     <FontAwesomeIcon icon={faChevronDown} className={`chevron ${isOpen ? 'open' : ''}`} />
                   </div>

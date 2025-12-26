@@ -37,6 +37,12 @@ export AWS_REGION=us-east-1
 export AWS_ACCOUNT_ID=your-account-id  # Will be auto-detected if not set
 export ESS_FEATURE_ENABLED=false  # Set to true to enable ESS feature
 export LIGHTSAIL_SERVICE_NAME=livescore-app
+
+# GraphQL API settings (defaults shown)
+export GRAPHQL_TIMEOUT=60000                    # Request timeout in ms
+export GRAPHQL_CACHE_MAX_AGE_MS=259200000       # 3 days cache TTL
+export GRAPHQL_CACHE_IDLE_EVICTION_MS=3600000   # Evict after 1 hour idle
+export RESPONSE_CACHE_TTL_MS=5000               # Response cache TTL
 ```
 
 ### 3. Run Deployment Script
@@ -121,7 +127,6 @@ aws lightsail create-container-service-deployment \
    - Scale: `1` (or higher for production)
 5. Add containers:
    - **nginx**: Use ECR image URI, port 80
-   - **client**: Use ECR image URI
    - **server**: Use ECR image URI, add environment variables
 6. Set public endpoint to nginx container, port 80
 7. Deploy
@@ -147,7 +152,13 @@ Or use the AWS Console to update the container service deployment.
 - `NODE_ENV`: `production`
 - `PORT`: `3000`
 - `ESS_FEATURE_ENABLED`: `false` or `true`
-- `FETCH_TIMEOUT`: `120000` (optional, milliseconds, default: 120 seconds / 2 minutes)
+
+#### GraphQL API Settings
+
+- `GRAPHQL_TIMEOUT`: `60000` (request timeout in milliseconds, default 60 seconds)
+- `GRAPHQL_CACHE_MAX_AGE_MS`: `259200000` (cache TTL, default 3 days)
+- `GRAPHQL_CACHE_IDLE_EVICTION_MS`: `3600000` (evict inactive entries after 1 hour)
+- `RESPONSE_CACHE_TTL_MS`: `5000` (response cache for identical requests, default 5 seconds)
 
 ### Client Container
 

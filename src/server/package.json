@@ -1,7 +1,7 @@
 {
   "name": "livescore-server",
   "version": "1.0.0",
-  "description": "Backend server for Livescore - Parses IPSC scores from ShootnScoreIt.com and ECM text files",
+  "description": "Backend server for Livescore - Fetches IPSC scores from ShootnScoreIt.com GraphQL API and parses ECM text files",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
@@ -9,8 +9,7 @@
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "test": "jest",
     "lint": "eslint src --ext .ts",
-    "lint:fix": "eslint src --ext .ts --fix",
-    "parse-file": "ts-node src/parseFile.ts"
+    "lint:fix": "eslint src --ext .ts --fix"
   },
   "keywords": [
     "ipsc",
@@ -20,17 +19,16 @@
     "shootnscoreit",
     "ecm",
     "express",
-    "api"
+    "api",
+    "graphql"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "cheerio": "^1.0.0-rc.12",
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "express-rate-limit": "^8.2.1",
-    "node-fetch": "^2.7.0",
-    "nock": "^14.0.10"
+    "node-fetch": "^2.7.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
