@@ -216,11 +216,22 @@ button:disabled {
 
 .stage-header {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
   margin-bottom: 0.5rem;
   padding-bottom: 0.25rem;
   border-bottom: 1px solid #e9ecef;
+}
+
+.stage-header-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.stage-stats-row {
+  font-size: 0.9rem;
+  color: #495057;
+  margin-top: 0.25rem;
 }
 
 .stage-header h4 {
@@ -231,6 +242,12 @@ button:disabled {
 .stage-score {
   font-weight: 600;
   color: inherit;
+}
+
+.stage-placement {
+  font-weight: 500;
+  color: #6c757d;
+  font-size: 0.875rem;
 }
 
 .hit-factor {

@@ -42,6 +42,7 @@ export interface StageScore {
 export interface CompetitorWithTotalScore {
     name: string;
     division: string;
+    category?: string;
     totalScore: number;
     stageScores: StageScore[];
     competitorKey: string;
@@ -50,5 +51,6 @@ export interface CompetitorWithTotalScore {
 export interface CompetitorKey {
     name: string;
     division: string;
+    category?: string;
     key: string;
 }

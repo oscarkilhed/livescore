@@ -112,7 +112,7 @@ function calculateHitsScore(hits: Hits, powerFactor: string): number {
 function calculateScoresForStages(stages: Stage[], category?: string): CompetitorWithTotalScore[] {
     const competitorSet = new Set<CompetitorKey>();
     stages.forEach(stage => {
-        stage.competitors.filter(c => category ? c.category === category : true).forEach(c => competitorSet.add({ name: c.name, division: c.division, key: c.competitorKey }));
+        stage.competitors.filter(c => category ? c.category === category : true).forEach(c => competitorSet.add({ name: c.name, division: c.division, category: c.category, key: c.competitorKey }));
     });
     const competitorsToInclude = Array.from(competitorSet);
 
@@ -122,6 +122,7 @@ function calculateScoresForStages(stages: Stage[], category?: string): Competito
         competitorMap.set(key, {
             name: competitor.name,
             division: competitor.division,
+            category: competitor.category,
             totalScore: 0,
             stageScores: [],
             competitorKey: key

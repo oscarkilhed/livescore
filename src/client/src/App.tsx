@@ -158,6 +158,33 @@ function App() {
     return ((score / highestScore) * 100).toFixed(1);
   };
 
+  /**
+   * Get the placement (rank) of a competitor on a specific stage
+   * Returns the 1-based position and the percentage of max score
+   */
+  const getStageStats = (competitorKey: string, stageNumber: number): { placement: number; totalOnStage: number; stagePercent: string } => {
+    // Get all scores for this stage from all competitors
+    const stageScoresForAll = scores
+      .map(c => {
+        const stageScore = c.stageScores.find(s => s.stage === stageNumber);
+        return stageScore ? { key: c.competitorKey, score: stageScore.score, maxScore: stageScore.maxPossibleScore } : null;
+      })
+      .filter((s): s is { key: string; score: number; maxScore: number } => s !== null);
+    
+    // Sort by score descending to get placements
+    const sorted = [...stageScoresForAll].sort((a, b) => b.score - a.score);
+    const placement = sorted.findIndex(s => s.key === competitorKey) + 1;
+    
+    // Calculate stage percentage
+    const myScore = stageScoresForAll.find(s => s.key === competitorKey);
+    const maxScoreOnStage = sorted.length > 0 ? sorted[0].score : 0;
+    const stagePercent = myScore && maxScoreOnStage > 0 
+      ? ((myScore.score / maxScoreOnStage) * 100).toFixed(1) 
+      : '0.0';
+    
+    return { placement, totalOnStage: sorted.length, stagePercent };
+  };
+
   const handleUrlPaste = (url: string) => {
     try {
       const urlObj = new URL(url);
@@ -194,7 +221,7 @@ function App() {
     setLoading(true);
     setError(null);
     try {
-      const baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : '/api';
+      const baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3001' : '/api';
       const response = await fetch(`${baseUrl}/${typeId}/${matchId}/${division}/parse`);
       
       if (!response.ok) {
@@ -272,7 +299,7 @@ function App() {
     setLoading(true);
     setError(null);
     try {
-      const baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : '/api';
+      const baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3001' : '/api';
       const response = await fetch(`${baseUrl}/ecm/txt/parse`, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
@@ -347,7 +374,7 @@ function App() {
     return (
       <div className="stage-scores">
         <div className="sticky-competitor-name">
-          <h3>{index + 1}. {competitor.name} {competitor.division}</h3>
+          <h3>{index + 1}. {competitor.name} {competitor.category && competitor.category !== '-' && `(${getCategoryDisplayName(competitor.category)}) `}{competitor.division}</h3>
         </div>
         <div className="total-hits">
           <div className="hits-container">
@@ -383,15 +410,23 @@ function App() {
         </div>
         {competitor.stageScores.map((stageScore) => {
           const safeHits = stageScore.hits ?? { A: 0, C: 0, D: 0, M: 0, NS: 0 };
+          const stageStats = getStageStats(competitor.competitorKey, stageScore.stage);
           return (
             <div key={stageScore.stage} className="stage">
               <div className="stage-header">
-                <h4>{stageScore.stageName || `Stage ${stageScore.stage}`}</h4>
-                <div>
-                  Score: <div className="stage-score">{(stageScore.score ?? 0).toFixed(2)} / {stageScore.maxPossibleScore ? (stageScore.maxPossibleScore).toFixed(2) : 'Unknown'}</div>
+                <div className="stage-header-row">
+                  <h4>{stageScore.stageName || `Stage ${stageScore.stage}`}</h4>
+                  <div className="stage-placement">
+                    #{stageStats.placement}/{stageStats.totalOnStage} ({stageStats.stagePercent}%)
+                  </div>
                 </div>
-                <div>
-                  HF: <div className="hit-factor">{stageScore.hitFactor?.toFixed(4) || 'N/A'}</div>
+                <div className="stage-header-row stage-stats-row">
+                  <div>
+                    Score: <span className="stage-score">{(stageScore.score ?? 0).toFixed(2)} / {stageScore.maxPossibleScore ? (stageScore.maxPossibleScore).toFixed(2) : 'Unknown'}</span>
+                  </div>
+                  <div>
+                    HF: <span className="hit-factor">{stageScore.hitFactor?.toFixed(4) || 'N/A'}</span>
+                  </div>
                 </div>
               </div>
               <div className="stage-details">
