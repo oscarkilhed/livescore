@@ -8,8 +8,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.nginx
-      args:
-        REACT_APP_FEATURE_FLAG_ESS_FEATURE: ${ESS_FEATURE_ENABLED:-false}
     ports:
       - "80:80"
     environment:
@@ -28,7 +26,6 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
-      - ESS_FEATURE_ENABLED=${ESS_FEATURE_ENABLED:-false}
       - GRAPHQL_TIMEOUT=${GRAPHQL_TIMEOUT:-60000}
       - GRAPHQL_CACHE_MAX_AGE_MS=${GRAPHQL_CACHE_MAX_AGE_MS:-259200000}
       - GRAPHQL_CACHE_IDLE_EVICTION_MS=${GRAPHQL_CACHE_IDLE_EVICTION_MS:-3600000}

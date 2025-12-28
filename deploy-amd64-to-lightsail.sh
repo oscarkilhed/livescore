@@ -18,7 +18,6 @@ AWS_REGION=${AWS_REGION:-${CONFIGURED_REGION:-eu-central-1}}
 AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID:-}
 ECR_REGISTRY_PREFIX="livescore"
 LIGHTSAIL_SERVICE_NAME=${LIGHTSAIL_SERVICE_NAME:-livescore-app}
-ESS_FEATURE_ENABLED=${ESS_FEATURE_ENABLED:-false}
 
 # Set AWS_DEFAULT_REGION to ensure AWS CLI uses the correct region
 export AWS_DEFAULT_REGION=$AWS_REGION
@@ -138,8 +137,8 @@ authenticate_docker
 echo ""
 echo -e "${GREEN}=== Building and Pushing AMD64 Images ===${NC}"
 
-# Nginx image (includes built client with feature flag support)
-build_and_push_amd64 "livescore-nginx" "${ECR_REGISTRY_PREFIX}-nginx" "Dockerfile.nginx" "--build-arg REACT_APP_FEATURE_FLAG_ESS_FEATURE=${ESS_FEATURE_ENABLED}"
+# Nginx image (includes built client)
+build_and_push_amd64 "livescore-nginx" "${ECR_REGISTRY_PREFIX}-nginx" "Dockerfile.nginx"
 
 # Server image
 build_and_push_amd64 "livescore-server" "${ECR_REGISTRY_PREFIX}-server" "Dockerfile.server"

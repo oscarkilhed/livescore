@@ -79,15 +79,18 @@ scorecards {
 ### Data Mapping
 
 #### Hits Mapping
-The GraphQL API uses different field names than the HTML parser:
+The GraphQL API provides dedicated fields for each score type:
 
-| HTML Parser | GraphQL Field | Description |
-|------------|---------------|-------------|
-| A | `ascore` | Alpha hits |
-| C | `cscore` | Charlie hits |
-| D | `dscore` | Delta hits |
-| M | `hscore` | Misses (H hits) |
-| NS | `bscore` | No-shoot hits (B hits) |
+| Field | GraphQL Field | Description |
+|-------|---------------|-------------|
+| A     | `ascore`      | Alpha hits  |
+| C     | `cscore`      | Charlie hits |
+| D     | `dscore`      | Delta hits  |
+| M     | `miss`        | Misses      |
+| NS    | `penalty`     | No-shoot penalties |
+| Proc  | `procedural`  | Procedure penalties |
+
+**Note:** The API also has `bscore`, `hscore`, and `xscore` fields, but these are NOT used for misses/no-shoots. The correct fields are `miss`, `penalty`, and `procedural`.
 
 #### Division Information
 Division information is available through `IpscCompetitorNode` inline fragment:
@@ -128,10 +131,11 @@ query GetLiveScores($contentType: Int!, $eventId: String!) {
           points
           hitfactor
           ascore
-          bscore
           cscore
           dscore
-          hscore
+          miss
+          penalty
+          procedural
         }
         competitor {
           id
@@ -242,9 +246,9 @@ query GetLiveScores($contentType: Int!, $eventId: String!) {
 2. **Power Factor:** ✅ RESOLVED
    - Directly available via `handgun_pf` ("+"/"-") and `get_handgun_pf_display` ("Major"/"Minor")
 
-3. **Hit Mapping Verification:** ⏳ PENDING
-   - Verify that `bscore` maps to NS and `hscore` maps to M
-   - Need to compare with actual HTML scraping results
+3. **Hit Mapping Verification:** ✅ RESOLVED
+   - The API provides dedicated fields: `miss` for misses (M), `penalty` for no-shoots (NS), and `procedural` for procedures
+   - `bscore` and `hscore` are NOT used for M/NS (they may be for other scoring systems)
 
 4. **Content Type:**
    - Currently hardcoded to `22` (IPSC Match)

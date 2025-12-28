@@ -4,7 +4,7 @@ A web application for calculating and comparing IPSC (International Practical Sh
 
 ## Features
 
-- **Live Score Fetching**: Fetch and parse live scores from ShootnScoreIt.com
+- **Live Score Fetching**: Fetch and parse live scores from ShootnScoreIt.com via GraphQL API
 - **Score Calculation**: Calculate competitor scores across multiple stages with proper hit factor calculations
 - **Competitor Comparison**: Compare specific competitors across common stages
 - **Division Support**: Support for multiple IPSC divisions:
@@ -24,9 +24,8 @@ The application consists of:
 
 - **Client** (`src/client/`): React-based frontend application
 - **Server** (`src/server/`): Express.js backend API that:
-  - Fetches HTML from ShootnScoreIt.com
-  - Parses HTML and ECM text files
-  - Provides REST API endpoints
+  - Fetches data from ShootnScoreIt.com GraphQL API
+  - Provides REST API endpoints with caching
 - **Docker**: Containerized deployment with Docker Compose
 
 ## Prerequisites
@@ -87,12 +86,11 @@ docker compose up -d
 
 ## Usage
 
-### SSI (ShootnScoreIt) Mode
+### Fetching Scores
 
-1. Navigate to the SSI tab
-2. Enter the Type ID, Match ID, and select a division
-3. Optionally paste a ShootnScoreIt URL (the app will extract IDs automatically)
-4. Click "Get Scores" to fetch and display scores
+1. Enter a ShootnScoreIt URL (the app will extract IDs automatically)
+2. Select a division
+3. Click "Get Scores" to fetch and display scores
 
 ### Comparing Competitors
 
@@ -125,26 +123,19 @@ Fetches and parses live scores from ShootnScoreIt.com
 - `matchId`: Match ID
 - `division`: Division code
 
-**Response:** JSON array of stages with competitors
+**Response:** JSON object with eventName and stages array
 
 ## Configuration
 
-The server can be configured using environment variables. Copy `.env.example` to `.env` and customize as needed:
+The server can be configured using environment variables:
 
 - `PORT`: Server port (default: 3000)
-- `SSI_API_BASE_URL`: Base URL for ShootnScoreIt API (default: `https://shootnscoreit.com`)
-- `CACHE_TTL`: Cache TTL in milliseconds (default: 300000 = 5 minutes)
-- `NODE_ENV`: Node environment - `development`, `production`, or `test` (default: `development`)
-
-### Environment Variables
-
-Create a `.env` file in the root directory (see `.env.example` for a template):
-
-```bash
-cp .env.example .env
-```
-
-**Note**: The `.env` file is gitignored and should not be committed to the repository.
+- `GRAPHQL_API_URL`: GraphQL API endpoint (default: `https://shootnscoreit.com/graphql/`)
+- `GRAPHQL_TIMEOUT`: Timeout for GraphQL requests in ms (default: 60000)
+- `GRAPHQL_CACHE_MAX_AGE_MS`: Max age for GraphQL cache (default: 259200000 = 3 days)
+- `GRAPHQL_CACHE_IDLE_EVICTION_MS`: Idle eviction time (default: 3600000 = 1 hour)
+- `RESPONSE_CACHE_TTL_MS`: Response cache TTL (default: 5000)
+- `NODE_ENV`: Node environment - `development`, `production`, or `test`
 
 ## Development
 
@@ -188,17 +179,11 @@ livescore/
 │   └── server/                    # Express.js backend API
 │       ├── src/
 │       │   ├── index.ts           # Express server and API endpoints
-│       │   ├── parser.ts          # HTML/ECM text parsing logic
-│       │   ├── cache.ts           # HTTP response caching layer
+│       │   ├── graphql.ts         # GraphQL API client
 │       │   ├── config.ts          # Server configuration management
-│       │   ├── parseFile.ts      # CLI utility for parsing HTML files
+│       │   ├── errors.ts          # Error handling classes
 │       │   ├── types.ts           # TypeScript type definitions
 │       │   └── *.test.ts         # Server-side tests
-│       ├── test/                  # Test data files
-│       │   ├── ECM.txt
-│       │   ├── ECM.html
-│       │   ├── livescore.html
-│       │   └── ...
 │       ├── .eslintrc.js          # ESLint configuration
 │       ├── jest.config.js         # Jest test configuration
 │       └── package.json
@@ -206,7 +191,6 @@ livescore/
 ├── Dockerfile.nginx               # Nginx reverse proxy image (includes built client)
 ├── docker-compose.yml             # Docker Compose configuration
 ├── nginx.conf                     # Nginx configuration (includes client serving and API proxy)
-├── .env.example                   # Example environment variables
 ├── .gitignore                    # Git ignore rules
 ├── README.md                      # Project documentation
 ├── CONTRIBUTING.md                # Contribution guidelines
@@ -218,7 +202,6 @@ livescore/
 **Key Directories:**
 - `src/client/` - React frontend application (port 3002)
 - `src/server/` - Express.js backend API (port 3000)
-- `src/server/test/` - Test data files (HTML, ECM text)
 - Root level - Docker configurations and project documentation
 
 ## License

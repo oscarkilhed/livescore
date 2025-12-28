@@ -5,7 +5,6 @@ import './App.css';
 import { CompetitorWithTotalScore, Stage } from './types';
 import { calculateCompetitorScores, calculateMaxPossibleScores, compareCompetitors } from './calculator';
 import Select, { MultiValue } from 'react-select';
-import { isFeatureEnabled } from './featureFlags';
 
 interface Division {
   value: string;
@@ -13,7 +12,7 @@ interface Division {
 }
 
 const DIVISIONS: Division[] = [
-  { value: 'all', label: 'All' },
+  { value: 'all', label: 'Overall (division)' },
   { value: 'hg1', label: 'Open' },
   { value: 'hg2', label: 'Standard' },
   { value: 'hg3', label: 'Production' },
@@ -48,8 +47,6 @@ const getCategoryDisplayName = (code: string): string => {
 
 function App() {
   const [stages, setStages] = useState<Array<Stage>>([]);
-  const essFeatureEnabled = isFeatureEnabled('ESS_FEATURE');
-  const [activeTab, setActiveTab] = useState<'SSI' | 'ESS'>(essFeatureEnabled ? 'SSI' : 'SSI');
   const [matchId, setMatchId] = useState('');
   const [typeId, setTypeId] = useState('');
   const [division, setDivision] = useState('all');
@@ -66,14 +63,8 @@ function App() {
   const [expandedStageCompetitors, setExpandedStageCompetitors] = useState<Record<number, string[]>>({});
   const stageHeaderRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const [selectedCategory, setSelectedCategory] = useState<string>('Overall');
-  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
-
-  // Ensure activeTab is valid based on feature flags
-  useEffect(() => {
-    if (!essFeatureEnabled && activeTab === 'ESS') {
-      setActiveTab('SSI');
-    }
-  }, [essFeatureEnabled, activeTab]);
+  const [appliedCategory, setAppliedCategory] = useState<string>('Overall');
+  const [competitionName, setCompetitionName] = useState<string>('');
 
   // Load initial values from URL parameters
   useEffect(() => {
@@ -98,7 +89,10 @@ function App() {
         .filter(n => !Number.isNaN(n));
       setExcludedStages(parsed);
     }
-    if (urlCategory) setSelectedCategory(urlCategory);
+    if (urlCategory) {
+      setSelectedCategory(urlCategory);
+      setAppliedCategory(urlCategory);
+    }
 
     // If we have matchId and typeId, construct and populate the SSI URL
     if (urlMatchId && urlTypeId) {
@@ -111,8 +105,6 @@ function App() {
       setShouldFetch(true);
     }
   }, []); // Empty dependency array means this runs once on mount
-
-  
 
   // Update URL when matchId, typeId, division, selectedCompetitors, excludedStages, or category change
   useEffect(() => {
@@ -130,15 +122,15 @@ function App() {
     } else {
       params.delete('exclude');
     }
-    if (selectedCategory && selectedCategory !== 'Overall') {
-      params.set('category', selectedCategory);
+    if (appliedCategory && appliedCategory !== 'Overall') {
+      params.set('category', appliedCategory);
     } else {
       params.delete('category');
     }
     
     const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
     window.history.replaceState({}, '', newUrl);
-  }, [matchId, typeId, division, selectedCompetitors, excludedStages, selectedCategory]);
+  }, [matchId, typeId, division, selectedCompetitors, excludedStages, appliedCategory]);
 
   const getCommonStages = (competitors: CompetitorWithTotalScore[]): number[] => {
     if (competitors.length === 0) return [];
@@ -249,8 +241,13 @@ function App() {
       }
       
       const data = await response.json();
-      const stagesWithMaxScores = calculateMaxPossibleScores(data);
+      // Handle new response format: { eventName: string, stages: Stage[] }
+      const stagesData = data.stages || data;
+      const stagesWithMaxScores = calculateMaxPossibleScores(stagesData);
       setStages(stagesWithMaxScores);
+      if (data.eventName) {
+        setCompetitionName(data.eventName);
+      }
     } catch (err) {
       // Handle network errors and other exceptions
       if (err instanceof TypeError && err.message === 'Failed to fetch') {
@@ -273,8 +270,6 @@ function App() {
     }
   }, [shouldFetch, matchId, typeId, division, fetchData]);
 
-  const [ecmText, setEcmText] = useState('');
-
   const availableCategories = useMemo(() => {
     const set = new Set<string>();
     stages.forEach(stage => {
@@ -289,68 +284,14 @@ function App() {
     if (selectedCategory !== 'Overall' && !availableCategories.includes(selectedCategory)) {
       setSelectedCategory('Overall');
     }
-  }, [availableCategories, selectedCategory]);
-
-  const submitEcmText = async () => {
-    if (!ecmText || ecmText.trim().length === 0) {
-      setError('Please paste ECM.txt content first');
-      return;
+    if (appliedCategory !== 'Overall' && !availableCategories.includes(appliedCategory)) {
+      setAppliedCategory('Overall');
     }
-    setLoading(true);
-    setError(null);
-    try {
-      const baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3001' : '/api';
-      const response = await fetch(`${baseUrl}/ecm/txt/parse`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: ecmText
-      });
-      
-      if (!response.ok) {
-        // Try to parse error response for more details
-        let errorMessage = 'Failed to parse ECM text';
-        try {
-          const errorData = await response.json();
-          if (errorData.error) {
-            errorMessage = errorData.error;
-          } else if (errorData.message) {
-            errorMessage = errorData.message;
-          }
-        } catch {
-          // If we can't parse the error response, use status-based messages
-          if (response.status === 504) {
-            errorMessage = 'Request timed out. Please try again.';
-          } else if (response.status === 503) {
-            errorMessage = 'Service temporarily unavailable. Please try again in a moment.';
-          }
-        }
-        throw new Error(errorMessage);
-      }
-      
-      const data = await response.json();
-      const stagesWithMaxScores = calculateMaxPossibleScores(data);
-      setStages(stagesWithMaxScores);
-      setSelectedCategory('Overall');
-      // Reset URL params to avoid confusion with SSI flow
-      setTypeId('');
-      setMatchId('');
-      setDivision('hg18');
-    } catch (err) {
-      // Handle network errors and other exceptions
-      if (err instanceof TypeError && err.message === 'Failed to fetch') {
-        setError('Network error: Unable to connect to the server. Please check your internet connection and try again.');
-      } else if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError('An unexpected error occurred. Please try again.');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [availableCategories, selectedCategory, appliedCategory]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAppliedCategory(selectedCategory);
     setShouldFetch(true);
   };
 
@@ -482,13 +423,13 @@ function App() {
     );
   };
 
-  // Update comparison and scores when stages, excludedStages, selectedCompetitors or category change
+  // Update comparison and scores when stages, excludedStages, selectedCompetitors or appliedCategory change
   useEffect(() => {
     const filteredStages = stages.filter(s => !excludedStages.includes(s.stage));
-    const categoryParam = selectedCategory === 'Overall' ? undefined : selectedCategory;
+    const categoryParam = appliedCategory === 'Overall' ? undefined : appliedCategory;
     setComparison(compareCompetitors(filteredStages, selectedCompetitors, categoryParam));
     setScores(calculateCompetitorScores(filteredStages, categoryParam));
-  }, [stages, selectedCompetitors, excludedStages, selectedCategory]);
+  }, [stages, selectedCompetitors, excludedStages, appliedCategory]);
 
   const availableStageNumbers = Array.from(new Set(stages.map(s => s.stage))).sort((a, b) => a - b);
   // Build a map of stage number to stage name for use in the UI
@@ -551,134 +492,51 @@ function App() {
   return (
     <div className="App">
       <h1>Live Scores</h1>
-      <div className="tabs">
-        <div className="tab-headers" style={{ display: 'flex', gap: 8}}>
-          <button
-            className={activeTab === 'SSI' ? 'tab active' : 'tab'}
-            onClick={() => setActiveTab('SSI')}
+      <div className="tab-panel">
+        <form onSubmit={handleSubmit}>
+          <div>
+          <input
+            type="text"
+            placeholder="Paste ShootnScoreIt URL (e.g., https://shootnscoreit.com/event/22/21833/live-scores/)"
+            value={ssiUrl}
+            onChange={(e) => {
+              setSsiUrl(e.target.value);
+              handleUrlPaste(e.target.value);
+            }}
+          />
+          <input type="hidden" name="typeId" value={typeId} />
+          <input type="hidden" name="matchId" value={matchId} />
+          <select
+            value={division}
+            onChange={(e) => setDivision(e.target.value)}
+            className="division-select"
           >
-            SSI
-          </button>
-          {essFeatureEnabled && (
-            <button
-              className={activeTab === 'ESS' ? 'tab active' : 'tab'}
-              onClick={() => setActiveTab('ESS')}
-            >
-              ESS
+            {DIVISIONS.map((div) => (
+              <option key={div.value} value={div.value}>
+                {div.label}
+              </option>
+            ))}
+          </select>
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="division-select"
+            title="Filter by competitor category"
+          >
+            <option value="Overall">Overall (category)</option>
+            {availableCategories.map(cat => (
+              <option key={cat} value={cat}>{getCategoryDisplayName(cat)}</option>
+            ))}
+          </select>
+            <button type="submit" disabled={loading}>
+              {loading ? 'Loading...' : 'Get Scores'}
             </button>
-          )}
-        </div>
-        {activeTab === 'SSI' && (
-          <div className="tab-panel">
-            <form onSubmit={handleSubmit}>
-              <div>
-              <input
-                type="text"
-                placeholder="Paste ShootnScoreIt URL (e.g., https://shootnscoreit.com/event/22/21833/live-scores/)"
-                value={ssiUrl}
-                onChange={(e) => {
-                  setSsiUrl(e.target.value);
-                  handleUrlPaste(e.target.value);
-                }}
-              />
-              <div className="advanced-options-section">
-                <div
-                  className="advanced-options-header"
-                  onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
-                  style={{ 
-                    cursor: 'pointer', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '6px', 
-                    padding: '0.25rem 0', 
-                    marginTop: '0.25rem',
-                    fontSize: '0.875rem',
-                    color: '#6c757d'
-                  }}
-                >
-                  <FontAwesomeIcon 
-                    icon={faChevronDown} 
-                    className={`chevron ${showAdvancedOptions ? 'open' : ''}`}
-                    style={{ fontSize: '0.75rem', opacity: 0.7 }}
-                  />
-                  <span style={{ fontWeight: 400 }}>Advanced Options</span>
-                </div>
-                {showAdvancedOptions && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
-                    <input
-                      type="text"
-                      placeholder="Type ID"
-                      value={typeId}
-                      onChange={(e) => setTypeId(e.target.value)}
-                    />
-                    <input
-                      type="text"
-                      placeholder="Match ID"
-                      value={matchId}
-                      onChange={(e) => setMatchId(e.target.value)}
-                    />
-                  </div>
-                )}
-              </div>
-              <select
-                value={division}
-                onChange={(e) => setDivision(e.target.value)}
-                className="division-select"
-              >
-                {DIVISIONS.map((div) => (
-                  <option key={div.value} value={div.value}>
-                    {div.label}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="division-select"
-                title="Filter by competitor category"
-              >
-                <option value="Overall">Overall</option>
-                {availableCategories.map(cat => (
-                  <option key={cat} value={cat}>{getCategoryDisplayName(cat)}</option>
-                ))}
-              </select>
-                <button type="submit" disabled={loading}>
-                  {loading ? 'Loading...' : 'Get Scores'}
-                </button>
-              </div>
-            </form>
           </div>
-        )}
-        {activeTab === 'ESS' && (
-          <div className="tab-panel">
-            <label style={{ display: 'block', marginBottom: 6, fontWeight: 600 }}>Paste the full stages page from ESS</label>
-            <textarea
-              placeholder="Paste the full stages page from ESS here"
-              value={ecmText}
-              onChange={(e) => setEcmText(e.target.value)}
-              style={{ width: '100%', maxWidth: 720, height: 160 }}
-            />
-            <div style={{ height: 8 }} />
-            <button onClick={submitEcmText} disabled={loading || !ecmText.trim()}>
-              {loading ? 'Loading...' : 'Parse ECM Text'}
-            </button>
-            <div style={{ height: 12 }} />
-            <label style={{ display: 'block', marginBottom: 6, fontWeight: 600 }}>Category</label>
-            <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              disabled={availableCategories.length === 0}
-              className="division-select"
-              style={{ maxWidth: 320 }}
-            >
-              <option value="Overall">Overall</option>
-              {availableCategories.map(cat => (
-                <option key={cat} value={cat}>{getCategoryDisplayName(cat)}</option>
-              ))}
-            </select>
-          </div>
-        )}
+        </form>
       </div>
+      {competitionName && (
+        <h3 className="competition-name" style={{ margin: '1rem 0 0.5rem', paddingLeft: '0.75rem', fontWeight: 500 }}>{competitionName}</h3>
+      )}
       <div className="control-panel">
         <label style={{ display: 'block', marginBottom: 6, fontWeight: 600 }}>Compare competitors</label>
         <Select
@@ -834,4 +692,4 @@ function App() {
   );
 }
 
-export default App; 
+export default App;

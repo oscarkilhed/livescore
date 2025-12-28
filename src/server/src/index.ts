@@ -1,10 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
-import { parseECMTxt } from './parser';
 import { config } from './config';
-import { AppError, ValidationError, FeatureDisabledError } from './errors';
-import { fetchLiveScoresWithCache, getGraphQLCacheStats, clearGraphQLCache } from './graphql';
+import { AppError } from './errors';
+import { fetchLiveScoresWithCache, getGraphQLCacheStats, clearGraphQLCache, LiveScoresResult } from './graphql';
 import { Stage } from './types';
 
 // ============================================================================
@@ -16,6 +15,7 @@ import { Stage } from './types';
  * Prevents multiple clients from hitting the API simultaneously
  */
 interface ResponseCacheEntry {
+  eventName: string;
   stages: Stage[];
   timestamp: number;
 }
@@ -32,10 +32,10 @@ const RESPONSE_CACHE_TTL_MS = config.responseCacheTtl;
 /**
  * Get cached response or null if expired/missing
  */
-function getCachedResponse(key: string): Stage[] | null {
+function getCachedResponse(key: string): LiveScoresResult | null {
   const entry = responseCache.get(key);
   if (entry && Date.now() - entry.timestamp < RESPONSE_CACHE_TTL_MS) {
-    return entry.stages;
+    return { eventName: entry.eventName, stages: entry.stages };
   }
   return null;
 }
@@ -43,9 +43,10 @@ function getCachedResponse(key: string): Stage[] | null {
 /**
  * Store response in cache
  */
-function setCachedResponse(key: string, stages: Stage[]): void {
+function setCachedResponse(key: string, result: LiveScoresResult): void {
   responseCache.set(key, {
-    stages,
+    eventName: result.eventName,
+    stages: result.stages,
     timestamp: Date.now()
   });
 }
@@ -105,7 +106,6 @@ const apiLimiter = rateLimit({
 if (config.rateLimitEnabled && process.env.NODE_ENV !== 'test') {
   app.use('/api/', apiLimiter);
   app.use('/:matchType/:matchId/:division/parse', apiLimiter);
-  app.use('/ecm/txt/parse', apiLimiter);
 }
 
 /**
@@ -117,7 +117,7 @@ if (config.rateLimitEnabled && process.env.NODE_ENV !== 'test') {
  * @param {string} matchType - Event type ID (e.g., '22')
  * @param {string} matchId - Match ID (e.g., '21833')
  * @param {string} division - Division code (e.g., 'hg18' for Production Optics)
- * @returns {Array<Stage>} JSON array of stages with competitors and scores
+ * @returns {object} JSON object with eventName and stages array
  * @throws {400} If required parameters are missing
  * @throws {500} If fetching fails
  * 
@@ -159,19 +159,19 @@ app.get('/:matchType/:matchId/:division/parse', async (req, res) => {
     const cacheKey = `${matchType}-${matchId}-${division}`;
     
     // Check response cache first (short TTL)
-    const cachedStages = getCachedResponse(cacheKey);
-    if (cachedStages) {
-      return res.json(cachedStages);
+    const cachedResult = getCachedResponse(cacheKey);
+    if (cachedResult) {
+      return res.json(cachedResult);
     }
     
     // Fetch from GraphQL API
     const contentType = parseInt(matchType, 10);
-    const stages = await fetchLiveScoresWithCache(contentType, matchId, division);
+    const result = await fetchLiveScoresWithCache(contentType, matchId, division);
     
     // Cache the response
-    setCachedResponse(cacheKey, stages);
+    setCachedResponse(cacheKey, result);
     
-    res.json(stages);
+    res.json(result);
   } catch (error) {
     if (error instanceof AppError) {
       // Log timeout errors with more detail
@@ -201,84 +201,6 @@ app.get('/:matchType/:matchId/:division/parse', async (req, res) => {
         timestamp: new Date().toISOString()
       });
     }
-  }
-});
-
-/**
- * POST endpoint for parsing ECM (European Championship Match) text format
- * 
- * Accepts ECM text content in the request body and parses it into structured stage data.
- * This endpoint is behind a feature flag (ESS_FEATURE_ENABLED) and returns 403 if disabled.
- * 
- * @route POST /ecm/txt/parse
- * @param {string} req.body - ECM text content (plain text, up to 20MB)
- * @returns {Array<Stage>} JSON array of stages with competitors and scores
- * @throws {403} If ESS feature is disabled
- * @throws {400} If request body is empty
- * @throws {500} If parsing fails
- * 
- * @example
- * POST /ecm/txt/parse
- * Content-Type: text/plain
- * Body: "Production Optics - Stage 1\nPlace\t#\tShooter\t..."
- */
-app.post('/ecm/txt/parse', express.text({ type: '*/*', limit: '20mb' }), async (req, res) => {
-  // Check feature flag
-  if (!config.essFeatureEnabled) {
-    const error = new FeatureDisabledError('ESS');
-    return res.status(error.statusCode).json({ 
-      error: error.message,
-      code: error.code,
-      timestamp: new Date().toISOString()
-    });
-  }
-  
-  try {
-    const bodyText = (req.body || '').toString();
-    
-    // Validate request body is not empty
-    if (!bodyText || bodyText.trim().length === 0) {
-      const error = new ValidationError('Empty request body');
-      return res.status(error.statusCode).json({ 
-        error: error.message,
-        code: error.code,
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // Validate body size (explicit check)
-    const sizeInMB = Buffer.byteLength(bodyText, 'utf8') / (1024 * 1024);
-    if (sizeInMB > 20) {
-      const error = new ValidationError(`Request body too large: ${sizeInMB.toFixed(2)}MB (max 20MB)`);
-      return res.status(413).json({ 
-        error: error.message,
-        code: error.code,
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    const parseStartTime = Date.now();
-    const stages = parseECMTxt(bodyText);
-    const parseElapsed = Date.now() - parseStartTime;
-    console.log(`[Parse] Successfully parsed ECM text in ${parseElapsed}ms (${stages.length} stages, body size: ${sizeInMB.toFixed(2)}MB)`);
-    return res.json(stages);
-  } catch (error) {
-    console.error('Error parsing ECM text payload:', error);
-    
-    if (error instanceof AppError) {
-      return res.status(error.statusCode).json({
-        error: error.message,
-        code: error.code,
-        timestamp: new Date().toISOString(),
-        ...(process.env.NODE_ENV === 'development' && error.cause ? { details: String(error.cause) } : {})
-      });
-    }
-    
-    return res.status(500).json({ 
-      error: 'Failed to parse ECM text payload',
-      code: 'INTERNAL_ERROR',
-      timestamp: new Date().toISOString()
-    });
   }
 });
 

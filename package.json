@@ -1,7 +1,7 @@
 {
   "name": "livescore",
   "version": "1.0.0",
-  "description": "A web application for calculating and comparing IPSC (International Practical Shooting Confederation) live scores from ShootnScoreIt.com and ECM text files",
+  "description": "A web application for calculating and comparing IPSC (International Practical Shooting Confederation) live scores from ShootnScoreIt.com",
   "main": "dist/index.js",
   "scripts": {
     "start": "node dist/index.js",

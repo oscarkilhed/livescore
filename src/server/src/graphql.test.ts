@@ -67,10 +67,11 @@ describe('GraphQL Module', () => {
       points: 120,
       hitfactor: 4.7059,
       ascore: 10,
-      bscore: 1,  // NS
       cscore: 2,
       dscore: 1,
-      hscore: 0,  // M
+      miss: 0,       // Misses (M)
+      penalty: 1,    // No-shoots (NS)
+      procedural: 0, // Procedures
       competitor: {
         id: '456',
         first_name: 'John',
@@ -117,8 +118,9 @@ describe('GraphQL Module', () => {
       expect(competitor.hits.A).toBe(10);
       expect(competitor.hits.C).toBe(2);
       expect(competitor.hits.D).toBe(1);
-      expect(competitor.hits.M).toBe(0);  // hscore
-      expect(competitor.hits.NS).toBe(1); // bscore
+      expect(competitor.hits.M).toBe(0);  // miss field
+      expect(competitor.hits.NS).toBe(1); // penalty field
+      expect(competitor.procedures).toBe(0); // procedural field
     });
 
     it('should handle missing competitor number by using name|division as key', () => {
@@ -173,10 +175,11 @@ describe('GraphQL Module', () => {
         points: 0,
         hitfactor: 0,
         ascore: 0,
-        bscore: 0,
         cscore: 0,
         dscore: 0,
-        hscore: 0,
+        miss: 0,
+        penalty: 0,
+        procedural: 0,
         competitor: {
           id: '456',
           first_name: 'Jane',
@@ -210,10 +213,11 @@ describe('GraphQL Module', () => {
             points: 100,
             hitfactor: 5.0,
             ascore: 10,
-            bscore: 0,
             cscore: 0,
             dscore: 0,
-            hscore: 0,
+            miss: 0,
+            penalty: 0,
+            procedural: 0,
             competitor: {
               id: 'c1',
               first_name: 'Alice',
@@ -231,10 +235,11 @@ describe('GraphQL Module', () => {
             points: 90,
             hitfactor: 3.6,
             ascore: 8,
-            bscore: 0,
             cscore: 2,
             dscore: 0,
-            hscore: 0,
+            miss: 0,
+            penalty: 0,
+            procedural: 0,
             competitor: {
               id: 'c2',
               first_name: 'Bob',
@@ -259,10 +264,11 @@ describe('GraphQL Module', () => {
             points: 80,
             hitfactor: 5.33,
             ascore: 8,
-            bscore: 0,
             cscore: 0,
             dscore: 0,
-            hscore: 0,
+            miss: 0,
+            penalty: 0,
+            procedural: 0,
             competitor: {
               id: 'c1',
               first_name: 'Alice',

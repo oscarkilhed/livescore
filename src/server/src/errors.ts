@@ -50,15 +50,6 @@ export class ValidationError extends AppError {
 }
 
 /**
- * Error thrown when a feature is disabled
- */
-export class FeatureDisabledError extends AppError {
-  constructor(featureName: string) {
-    super(`Feature '${featureName}' is disabled`, 'FEATURE_DISABLED', 403);
-  }
-}
-
-/**
  * Error thrown when GraphQL API request fails
  */
 export class GraphQLError extends AppError {

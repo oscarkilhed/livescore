@@ -1,4 +1,4 @@
-import { Stage, StageScore, CompetitorWithTotalScore, Competitor, Hits, CompetitorKey } from './types';
+import { Stage, StageScore, CompetitorWithTotalScore, Competitor, CompetitorKey } from './types';
 
 /**
  * Calculates the maximum possible score for each stage.
@@ -64,8 +64,9 @@ function calculateStageScore(competitor: Competitor, maxHitFactor: number, maxPo
     }
 
     const stageScore = (competitor.hitFactor / maxHitFactor) * maxPossibleScore;
-    const hitsScore = calculateHitsScore(competitor.hits, competitor.powerFactor);
-    const procedures = Math.max(0, (hitsScore - (competitor.points || 0)) / 10);
+    
+    // Procedure count is directly available from the GraphQL API
+    const procedures = competitor.procedures ?? 0;
 
     return {
         stage: stageNumber,
@@ -78,25 +79,6 @@ function calculateStageScore(competitor: Competitor, maxHitFactor: number, maxPo
         maxPossibleScore,
         hitFactor: competitor.hitFactor || 0
     };
-}
-
-/**
- * Calculates the total points score based on hits and power factor.
- * 
- * IPSC scoring:
- * - Major: A=5, C=4, D=2, M=-10, NS=-10
- * - Minor: A=5, C=3, D=1, M=-10, NS=-10
- * 
- * @param hits - Object containing hit counts (A, C, D, M, NS)
- * @param powerFactor - 'Major' or 'Minor'
- * @returns Total points score based on hits
- */
-function calculateHitsScore(hits: Hits, powerFactor: string): number {
-    if (powerFactor === 'Major') {
-        return hits.A * 5 + hits.C * 4 + hits.D * 2 + hits.M * -10 + hits.NS * -10;
-    } else {
-        return hits.A * 5 + hits.C * 3 + hits.D * 1 + hits.M * -10 + hits.NS * -10;
-    }
 }
 
 /**

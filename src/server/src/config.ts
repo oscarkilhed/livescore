@@ -5,7 +5,6 @@
 export interface ServerConfig {
   port: number;
   nodeEnv: string;
-  essFeatureEnabled: boolean; // Feature flag for ESS (ECM text parsing) functionality
   // GraphQL API configuration
   graphqlApiUrl: string; // GraphQL API endpoint URL
   graphqlTimeout: number; // Timeout for GraphQL requests in milliseconds
@@ -37,7 +36,6 @@ const getConfig = (): ServerConfig => {
   const config: ServerConfig = {
     port: parseInt(process.env.PORT || '3000', 10),
     nodeEnv,
-    essFeatureEnabled: process.env.ESS_FEATURE_ENABLED === 'true' || process.env.ESS_FEATURE_ENABLED === '1',
     // GraphQL API configuration
     graphqlApiUrl: process.env.GRAPHQL_API_URL || 'https://shootnscoreit.com/graphql/',
     graphqlTimeout: parseInt(process.env.GRAPHQL_TIMEOUT || '60000', 10), // Default 60 seconds

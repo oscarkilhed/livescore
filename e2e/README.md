@@ -11,12 +11,6 @@ This directory contains E2E (end-to-end) tests using Playwright for testing the 
   - URL parameter handling
   - Error handling
 
-- **`ess-flow.spec.ts`** - Tests for the ESS (ECM text) flow:
-  - Switching to ESS tab
-  - Pasting and parsing ECM text
-  - Displaying parsed results
-  - Error handling for invalid input
-
 - **`competitor-comparison.spec.ts`** - Tests for competitor comparison features:
   - Selecting competitors
   - Viewing comparison results
@@ -91,15 +85,6 @@ Tests use a two-layer mocking approach:
    - ECM parsing endpoint (`/api/ecm/txt/parse`)
 
 This ensures tests run fast and reliably without depending on external services.
-
-### Enabling Mock SSI API
-
-The mock SSI API is automatically enabled when running e2e tests via Playwright config.
-To manually enable it:
-
-```bash
-MOCK_SSI_API=true docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d
-```
 
 ## CI/CD Integration
 

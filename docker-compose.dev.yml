@@ -8,8 +8,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.nginx
-      args:
-        REACT_APP_FEATURE_FLAG_ESS_FEATURE: ${ESS_FEATURE_ENABLED:-false}
     ports:
       - "80:80"
     environment:
@@ -28,7 +26,6 @@ services:
     environment:
       - NODE_ENV=development
       - PORT=3000
-      - ESS_FEATURE_ENABLED=${ESS_FEATURE_ENABLED:-false}
     volumes:
       - ./src/server/src:/app/src
       - ./src/server/package.json:/app/package.json

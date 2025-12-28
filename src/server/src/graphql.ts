@@ -37,12 +37,13 @@ export interface GraphQLScorecard {
   time: number;
   points: number;
   hitfactor: number;
-  ascore: number;  // A hits (Alpha)
-  bscore: number;  // B hits (may map to NS - No Shoot)
-  cscore: number;  // C hits (Charlie)
-  dscore: number;  // D hits (Delta)
-  hscore: number;  // H hits (may map to M - Misses)
-  updated?: string; // ISO 8601 timestamp of last update
+  ascore: number;      // A hits (Alpha)
+  cscore: number;      // C hits (Charlie)
+  dscore: number;      // D hits (Delta)
+  miss: number;        // Misses (M) - the actual miss count
+  penalty: number;     // No-shoot penalties (NS)
+  procedural: number;  // Procedure penalties
+  updated?: string;    // ISO 8601 timestamp of last update
   competitor: GraphQLCompetitor;
 }
 
@@ -80,6 +81,14 @@ export interface GraphQLResponse {
   }>;
 }
 
+/**
+ * Result from fetching live scores, includes event metadata
+ */
+export interface LiveScoresResult {
+  eventName: string;
+  stages: Stage[];
+}
+
 // ============================================================================
 // GraphQL Query
 // ============================================================================
@@ -105,10 +114,11 @@ query GetLiveScores($contentType: Int!, $eventId: String!) {
           points
           hitfactor
           ascore
-          bscore
           cscore
           dscore
-          hscore
+          miss
+          penalty
+          procedural
           updated
         }
         competitor {
@@ -151,10 +161,11 @@ query GetLiveScoresIncremental($contentType: Int!, $eventId: String!, $updatedAf
             points
             hitfactor
             ascore
-            bscore
             cscore
             dscore
-            hscore
+            miss
+            penalty
+            procedural
             updated
           }
           competitor {
@@ -289,16 +300,21 @@ export function transformScorecard(scorecard: GraphQLScorecard): Competitor {
   );
   
   // Map GraphQL hit scores to Hits interface
-  // Note: bscore -> NS (No Shoot), hscore -> M (Misses)
-  // This mapping may need verification with actual data
-  // Parse as numbers to handle potential string values from GraphQL
+  // The API provides dedicated fields for each score type:
+  // - ascore, cscore, dscore: Hit zone counts (Alpha, Charlie, Delta)
+  // - miss: Miss count (M)
+  // - penalty: No-shoot penalties (NS)
+  // - procedural: Procedure penalties (returned separately, not in hits)
   const hits: Hits = {
     A: Number(scorecard.ascore) || 0,
     C: Number(scorecard.cscore) || 0,
     D: Number(scorecard.dscore) || 0,
-    M: Number(scorecard.hscore) || 0,  // H score = Misses
-    NS: Number(scorecard.bscore) || 0, // B score = No Shoots
+    M: Number(scorecard.miss) || 0,     // Direct miss count from API
+    NS: Number(scorecard.penalty) || 0, // No-shoot penalties from API
   };
+  
+  // Procedure count is available directly from the API
+  const procedural = Number(scorecard.procedural) || 0;
   
   return {
     name: fullName,
@@ -309,6 +325,7 @@ export function transformScorecard(scorecard: GraphQLScorecard): Competitor {
     time: Number(scorecard.time) || 0,
     points: Number(scorecard.points) || 0,
     hits,
+    procedures: procedural,  // Procedure count directly from API
     competitorKey: competitor.number ? String(competitor.number) : `${fullName}|${displayDivision}`,
   };
 }
@@ -349,7 +366,7 @@ export function transformStages(
       stage: stage.number,
       stageName,
       competitors,
-      procedures: 0, // Not available in GraphQL API
+      procedures: 0, // Stage-level procedures (individual competitor procedures are in competitor.procedures)
     };
   });
 }
@@ -612,13 +629,13 @@ function mergeUpdatedScorecards(
  * @param contentType - Content type ID (e.g., 22 for IPSC Match)
  * @param eventId - Event/match ID
  * @param division - Optional division code to filter by (e.g., 'hg18')
- * @returns Array of Stage objects with competitors and scores
+ * @returns LiveScoresResult containing event name and stages with competitors and scores
  */
 export async function fetchLiveScoresWithCache(
   contentType: number,
   eventId: string,
   division?: string
-): Promise<Stage[]> {
+): Promise<LiveScoresResult> {
   const cacheKey = `${contentType}-${eventId}`;
   const cached = graphqlCache.get(cacheKey);
   const now = Date.now();
@@ -658,11 +675,17 @@ export async function fetchLiveScoresWithCache(
             lastAccessedAt: now,
           });
           
-          return transformStages(mergedEvent.stages, division);
+          return {
+            eventName: mergedEvent.name,
+            stages: transformStages(mergedEvent.stages, division),
+          };
         } else {
           // No updates, just update fetchedAt and return cached data
           cached.fetchedAt = now;
-          return transformStages(cached.event.stages, division);
+          return {
+            eventName: cached.event.name,
+            stages: transformStages(cached.event.stages, division),
+          };
         }
       }
     } catch (error) {
@@ -693,7 +716,10 @@ export async function fetchLiveScoresWithCache(
     lastAccessedAt: now,
   });
   
-  return transformStages(data.event.stages, division);
+  return {
+    eventName: data.event.name,
+    stages: transformStages(data.event.stages, division),
+  };
 }
 
 /**

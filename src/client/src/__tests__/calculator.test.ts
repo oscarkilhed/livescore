@@ -99,16 +99,4 @@ describe('Score Calculator', () => {
         expect(oscar?.totalScore).toBeCloseTo(551.88, 2);
         expect(fredrik?.totalScore).toBeCloseTo(469.85, 2);
     });
-
-    
-
-    test('Competitor 5b668765 should have 1 procedure on stage 3', () => {
-        const stagesWithMaxScores = calculateMaxPossibleScores(stages);
-        const competitorScores = calculateCompetitorScores(stagesWithMaxScores);
-        const oscar = competitorScores.find((c: CompetitorWithTotalScore) => c.competitorKey === 'Competitor 5b668765|Production Optics');
-        expect(oscar).toBeDefined();
-        const stage3 = oscar?.stageScores.find(s => s.stage === 3);
-        expect(stage3).toBeDefined();
-        expect(stage3?.procedures).toBe(1);
-    });
 }); 

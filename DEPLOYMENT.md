@@ -35,7 +35,6 @@ export AWS_DEFAULT_REGION=us-east-1
 ```bash
 export AWS_REGION=us-east-1
 export AWS_ACCOUNT_ID=your-account-id  # Will be auto-detected if not set
-export ESS_FEATURE_ENABLED=false  # Set to true to enable ESS feature
 export LIGHTSAIL_SERVICE_NAME=livescore-app
 
 # GraphQL API settings (defaults shown)
@@ -80,9 +79,8 @@ aws ecr get-login-password --region us-east-1 | \
 ### 3. Build and Tag Images
 
 ```bash
-# Nginx (includes built client with feature flag support)
-docker build -t livescore-nginx:latest -f Dockerfile.nginx \
-  --build-arg REACT_APP_FEATURE_FLAG_ESS_FEATURE=false .
+# Nginx (includes built client)
+docker build -t livescore-nginx:latest -f Dockerfile.nginx .
 docker tag livescore-nginx:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/livescore-nginx:latest
 
 # Server
@@ -151,7 +149,6 @@ Or use the AWS Console to update the container service deployment.
 
 - `NODE_ENV`: `production`
 - `PORT`: `3000`
-- `ESS_FEATURE_ENABLED`: `false` or `true`
 
 #### GraphQL API Settings
 
@@ -159,10 +156,6 @@ Or use the AWS Console to update the container service deployment.
 - `GRAPHQL_CACHE_MAX_AGE_MS`: `259200000` (cache TTL, default 3 days)
 - `GRAPHQL_CACHE_IDLE_EVICTION_MS`: `3600000` (evict inactive entries after 1 hour)
 - `RESPONSE_CACHE_TTL_MS`: `5000` (response cache for identical requests, default 5 seconds)
-
-### Client Container
-
-Feature flags are set at build time via `REACT_APP_FEATURE_FLAG_ESS_FEATURE`.
 
 ## Troubleshooting
 

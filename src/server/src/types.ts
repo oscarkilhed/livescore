@@ -15,6 +15,7 @@ export interface Competitor {
     time: number;
     points: number;
     hits: Hits;
+    procedures?: number;  // Procedure count from API (if available)
     stageScore?: number;
     competitorKey: string;
 }

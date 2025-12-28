@@ -6,7 +6,6 @@
         "80": "HTTP"
       },
       "environment": {
-        "REACT_APP_FEATURE_FLAG_ESS_FEATURE": "false",
         "NGINX_BACKEND_UPSTREAM": "localhost:3000"
       }
     },
@@ -18,7 +17,6 @@
       "environment": {
         "NODE_ENV": "production",
         "PORT": "3000",
-        "ESS_FEATURE_ENABLED": "false",
         "GRAPHQL_TIMEOUT": "60000",
         "GRAPHQL_CACHE_MAX_AGE_MS": "259200000",
         "GRAPHQL_CACHE_IDLE_EVICTION_MS": "3600000",
