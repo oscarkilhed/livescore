@@ -134,6 +134,8 @@ The server can be configured using environment variables:
 - `GRAPHQL_API_KEY`: **Required** SSI API key sent as `x-api-key`
 - `GRAPHQL_AUTH_TOKEN`: Optional bearer token for authenticated SSI calls
 - `GRAPHQL_SESSION_COOKIE`: Optional cookie header for authenticated SSI calls (for example `sessionid=...`)
+- `GRAPHQL_AUTH_USERNAME`: Optional SSI username for JWT login mutation
+- `GRAPHQL_AUTH_PASSWORD`: Optional SSI password for JWT login mutation (must be set with username)
 - `GRAPHQL_TIMEOUT`: Timeout for GraphQL requests in ms (default: 60000)
 - `GRAPHQL_CACHE_MAX_AGE_MS`: Max age for GraphQL cache (default: 259200000 = 3 days)
 - `GRAPHQL_CACHE_IDLE_EVICTION_MS`: Idle eviction time (default: 3600000 = 1 hour)
