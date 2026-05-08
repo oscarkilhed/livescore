@@ -398,12 +398,23 @@ async function executeQuery<T>(
   });
   
   try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'x-api-key': config.graphqlApiKey,
+    };
+
+    if (config.graphqlAuthToken) {
+      headers.Authorization = `Bearer ${config.graphqlAuthToken}`;
+    }
+
+    if (config.graphqlSessionCookie) {
+      headers.Cookie = config.graphqlSessionCookie;
+    }
+
     const fetchPromise = fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
+      headers,
       body: JSON.stringify({
         query,
         variables,
