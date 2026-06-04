@@ -39,6 +39,14 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  /* Clip any sub-pixel horizontal overflow so the page can't scroll sideways.
+     `clip` (not `hidden`) avoids creating a scroll container, so it doesn't
+     break position: sticky or promote the vertical axis to a scroller. */
+  overflow-x: clip;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -245,7 +253,9 @@ button:disabled {
 }
 
 .view-viewport {
-  overflow-x: hidden;
+  /* Clip the swipe slide-in animation without becoming a scroll container
+     (which `overflow-x: hidden` would, by promoting overflow-y to auto). */
+  overflow-x: clip;
 }
 
 @keyframes viewSlideLeft {
