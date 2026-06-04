@@ -7,6 +7,26 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Load configuration/secrets from .env if present.
+# Existing environment variables take precedence over values in .env.
+if [ -f .env ]; then
+    echo -e "${YELLOW}Loading configuration from .env...${NC}"
+    while IFS= read -r line || [ -n "$line" ]; do
+        # Trim leading whitespace
+        line="${line#"${line%%[![:space:]]*}"}"
+        # Skip blank lines and comments
+        case "$line" in
+            ''|'#'*) continue ;;
+        esac
+        key="${line%%=*}"
+        val="${line#*=}"
+        # Only set if not already defined in the environment
+        if [ -z "${!key:-}" ]; then
+            export "$key=$val"
+        fi
+    done < .env
+fi
+
 # Configuration
 # Try to get region from AWS config, fallback to eu-central-1
 CONFIGURED_REGION=$(aws configure get region 2>/dev/null || echo "")
@@ -151,10 +171,82 @@ echo ""
 echo -e "${GREEN}=== Deploying to Lightsail ===${NC}"
 echo -e "${YELLOW}Creating container service deployment...${NC}"
 
-# Create temporary deployment file with account ID and region replaced
+# Render the deployment file: substitute account/region and inject secrets safely.
+# Secret precedence: environment variable > value already on the live deployment > template.
+# Reusing the live value prevents re-runs from silently wiping secrets, and the script
+# refuses to deploy a placeholder GRAPHQL_API_KEY (see lightsail-deployment.json / .env.example).
 TEMP_DEPLOYMENT_FILE=$(mktemp)
 trap "rm -f $TEMP_DEPLOYMENT_FILE" EXIT
-sed -e "s/ACCOUNT_ID/${AWS_ACCOUNT_ID}/g" -e "s/AWS_REGION/${AWS_REGION}/g" lightsail-deployment.json > "$TEMP_DEPLOYMENT_FILE"
+
+# Current live deployment (may be empty if the service does not exist yet).
+LIVE_SERVICES_JSON=$(aws lightsail get-container-services \
+    --service-name "$LIGHTSAIL_SERVICE_NAME" --region "$AWS_REGION" --output json 2>/dev/null || echo "")
+
+if ! AWS_ACCOUNT_ID="$AWS_ACCOUNT_ID" AWS_REGION="$AWS_REGION" LIVE_SERVICES_JSON="$LIVE_SERVICES_JSON" \
+    python3 - "$TEMP_DEPLOYMENT_FILE" <<'PYEOF'
+import json, os, sys
+
+out_path = sys.argv[1]
+with open("lightsail-deployment.json") as f:
+    raw = f.read()
+raw = raw.replace("ACCOUNT_ID", os.environ["AWS_ACCOUNT_ID"]).replace("AWS_REGION", os.environ["AWS_REGION"])
+dep = json.loads(raw)
+
+# Env currently running on the live "api" container, if the service exists.
+live_env = {}
+live_raw = os.environ.get("LIVE_SERVICES_JSON", "").strip()
+if live_raw:
+    try:
+        svcs = json.loads(live_raw).get("containerServices", [])
+        if svcs:
+            cur = svcs[0].get("currentDeployment") or {}
+            live_env = (cur.get("containers", {}).get("api", {}) or {}).get("environment", {}) or {}
+    except Exception:
+        live_env = {}
+
+SECRETS = [
+    "GRAPHQL_API_KEY",
+    "GRAPHQL_AUTH_TOKEN",
+    "GRAPHQL_SESSION_COOKIE",
+    "GRAPHQL_AUTH_USERNAME",
+    "GRAPHQL_AUTH_PASSWORD",
+]
+PLACEHOLDERS = {"", "SET_ME"}
+
+api_env = dep["containers"]["api"]["environment"]
+sources = {}
+for key in SECRETS:
+    env_val = os.environ.get(key, "")
+    if env_val:
+        api_env[key] = env_val
+        sources[key] = "env"
+    elif live_env.get(key):
+        api_env[key] = live_env[key]
+        sources[key] = "live"
+    else:
+        sources[key] = "template"
+
+if api_env.get("GRAPHQL_API_KEY", "") in PLACEHOLDERS:
+    sys.stderr.write(
+        "\nERROR: GRAPHQL_API_KEY is not set and no value exists on the live service.\n"
+        "Provide it via the environment or a .env file, e.g.:\n"
+        "  export GRAPHQL_API_KEY=your-ssi-api-key\n"
+        "or add it to .env (see .env.example), then re-run.\n\n"
+    )
+    sys.exit(1)
+
+with open(out_path, "w") as f:
+    json.dump(dep, f)
+
+# Report sources without revealing secret values.
+print("Secret resolution (source | length):")
+for key in SECRETS:
+    print(f"  {key}: {sources[key]} | {len(api_env.get(key, ''))} chars")
+PYEOF
+then
+    echo -e "${RED}✗ Failed to render deployment configuration${NC}"
+    exit 1
+fi
 
 if aws lightsail create-container-service-deployment \
     --service-name "$LIGHTSAIL_SERVICE_NAME" \

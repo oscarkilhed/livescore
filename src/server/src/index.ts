@@ -6,6 +6,7 @@ import { config } from './config';
 import { AppError } from './errors';
 import { fetchLiveScoresWithCache, getGraphQLCacheStats, clearGraphQLCache, LiveScoresResult } from './graphql';
 import { Stage } from './types';
+import { recordHit, getHotMatches, DEFAULT_LIMIT } from './hotMatches';
 
 // ============================================================================
 // Response Cache (short TTL for reducing API load)
@@ -162,16 +163,19 @@ app.get('/:matchType/:matchId/:division/parse', async (req, res) => {
     // Check response cache first (short TTL)
     const cachedResult = getCachedResponse(cacheKey);
     if (cachedResult) {
+      // Cache hits are still real views — count them for hot-match tracking.
+      recordHit(matchType, matchId, division, cachedResult.eventName);
       return res.json(cachedResult);
     }
-    
+
     // Fetch from GraphQL API
     const contentType = parseInt(matchType, 10);
     const result = await fetchLiveScoresWithCache(contentType, matchId, division);
-    
+
     // Cache the response
     setCachedResponse(cacheKey, result);
-    
+
+    recordHit(matchType, matchId, division, result.eventName);
     res.json(result);
   } catch (error) {
     if (error instanceof AppError) {
@@ -260,8 +264,30 @@ app.delete('/api/cache', (req, res) => {
 });
 
 /**
+ * GET endpoint returning the matches currently being viewed most.
+ *
+ * Derived from `/parse` traffic tracked in-memory. Used by the client landing
+ * page to surface "live now" matches when no match is selected.
+ *
+ * @route GET /hot-matches
+ * @query {number} [limit] - Max matches to return (clamped to 1..50)
+ * @returns {object} JSON object with a `matches` array, ranked by recent views
+ *
+ * Note: in production the client reaches this via `/api/hot-matches`; nginx
+ * rewrites `^/api/(.*)` to `/$1` before proxying, mirroring the `/parse` route.
+ */
+app.get('/hot-matches', (req, res) => {
+  const rawLimit = parseInt(String(req.query.limit ?? ''), 10);
+  const limit = Number.isFinite(rawLimit)
+    ? Math.min(50, Math.max(1, rawLimit))
+    : DEFAULT_LIMIT;
+
+  res.json({ matches: getHotMatches(limit) });
+});
+
+/**
  * Health check endpoint for monitoring and load balancers
- * 
+ *
  * @route GET /health
  * @returns {object} Health status object
  */

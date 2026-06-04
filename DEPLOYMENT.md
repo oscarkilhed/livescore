@@ -32,6 +32,16 @@ export AWS_DEFAULT_REGION=us-east-1
 
 ### 2. Set Deployment Variables (Optional)
 
+These can be exported in your shell **or** placed in a `.env` file in the repo
+root (see `.env.example`). The deploy script auto-loads `.env`; values already
+present in the environment take precedence over `.env`.
+
+Secrets are resolved with the precedence: **environment/`.env` → value already
+running on the live Lightsail service → template default**. This means re-running
+the script will reuse the live secrets rather than wiping them, and the script
+will **abort** if `GRAPHQL_API_KEY` ends up unset (it never deploys the `SET_ME`
+placeholder from `lightsail-deployment.json`).
+
 ```bash
 export AWS_REGION=us-east-1
 export AWS_ACCOUNT_ID=your-account-id  # Will be auto-detected if not set
@@ -60,7 +70,9 @@ This script will:
 - Create ECR repositories (if they don't exist)
 - Authenticate Docker to ECR
 - Build and push images (nginx includes built client, server)
-- Output the ECR image URIs and example Lightsail configuration
+- Render `lightsail-deployment.json` with your account ID, region, and secrets
+  (reusing live secrets when not provided; aborts if `GRAPHQL_API_KEY` is unset)
+- Create a new Lightsail container-service deployment and print the service URL
 
 ## Manual Deployment Steps
 
