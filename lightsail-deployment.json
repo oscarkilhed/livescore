@@ -17,6 +17,12 @@
       "environment": {
         "NODE_ENV": "production",
         "PORT": "3000",
+        "GRAPHQL_API_URL": "https://shootnscoreit.com/graphql/",
+        "GRAPHQL_API_KEY": "SET_ME",
+        "GRAPHQL_AUTH_TOKEN": "",
+        "GRAPHQL_SESSION_COOKIE": "",
+        "GRAPHQL_AUTH_USERNAME": "",
+        "GRAPHQL_AUTH_PASSWORD": "",
         "GRAPHQL_TIMEOUT": "60000",
         "GRAPHQL_CACHE_MAX_AGE_MS": "259200000",
         "GRAPHQL_CACHE_IDLE_EVICTION_MS": "3600000",

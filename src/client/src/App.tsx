@@ -3,8 +3,15 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faUserPlus, faUserMinus, faChevronDown } from '@fortawesome/free-solid-svg-icons';
 import './App.css';
 import { CompetitorWithTotalScore, Stage } from './types';
-import { calculateCompetitorScores, calculateMaxPossibleScores, compareCompetitors } from './calculator';
+import { calculateCompetitorScores, calculateMaxPossibleScores, compareCompetitors, findClosestRivals, RivalResult, computeProjectedFinish, ProjectedFinish, computeProjectedStandings, ProjectedStandingEntry } from './calculator';
 import Select, { MultiValue } from 'react-select';
+import {
+  downloadAllOverlaysAsZip,
+  StageOverlayEntry,
+  Movement,
+  StandingRow,
+} from './StageOverlay';
+import OverlaySettingsModal from './OverlaySettingsModal';
 
 interface Division {
   value: string;
@@ -45,66 +52,69 @@ const getCategoryDisplayName = (code: string): string => {
   return CATEGORY_DISPLAY_MAP[code] || code;
 };
 
+/**
+ * Format a 1-based rank as an ordinal string (1 -> "1st", 2 -> "2nd", 11 -> "11th").
+ */
+const ordinal = (n: number): string => {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+};
+
 function App() {
+  // Parse the URL query string once and seed state from it via lazy useState
+  // initializers. Doing this at initialization (rather than in a mount effect)
+  // is important: the URL-writeback effect below runs on the first commit with
+  // whatever state exists then. Because the `division` default 'all' is truthy,
+  // a mount-effect approach let that effect rewrite ?division=... in the URL
+  // before setDivision was applied — and under React.StrictMode the mount effect
+  // then re-read the already-clobbered URL and reset division back to 'all'.
+  // (matchId/typeId escaped this only because their '' defaults are falsy and so
+  // were never written to the URL.) Seeding state here means the first render
+  // already holds the requested values, so there is nothing to clobber.
+  const [initialParams] = useState(() => new URLSearchParams(window.location.search));
+  const initialMatchId = initialParams.get('matchId') || '';
+  const initialTypeId = initialParams.get('typeId') || '';
+
   const [stages, setStages] = useState<Array<Stage>>([]);
-  const [matchId, setMatchId] = useState('');
-  const [typeId, setTypeId] = useState('');
-  const [division, setDivision] = useState('all');
-  const [ssiUrl, setSsiUrl] = useState('');
-  const [selectedCompetitors, setSelectedCompetitors] = useState<string[]>([]);
+  const [matchId, setMatchId] = useState(initialMatchId);
+  const [typeId, setTypeId] = useState(initialTypeId);
+  const [division, setDivision] = useState(() => initialParams.get('division') || 'all');
+  const [ssiUrl, setSsiUrl] = useState(() =>
+    initialMatchId && initialTypeId
+      ? `https://shootnscoreit.com/event/${initialTypeId}/${initialMatchId}/live-scores/`
+      : '',
+  );
+  const [selectedCompetitors, setSelectedCompetitors] = useState<string[]>(() => {
+    const c = initialParams.get('competitors');
+    return c ? c.split(',') : [];
+  });
   const [comparison, setComparison] = useState<CompetitorWithTotalScore[]>([]);
   const [scores, setScores] = useState<CompetitorWithTotalScore[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedCompetitor, setExpandedCompetitor] = useState<string | null>(null);
-  const [shouldFetch, setShouldFetch] = useState(false);
-  const [excludedStages, setExcludedStages] = useState<number[]>([]);
+  // Fetch on load when we have the required params (division defaults to 'all').
+  const [shouldFetch, setShouldFetch] = useState(() => Boolean(initialMatchId && initialTypeId));
+  const [excludedStages, setExcludedStages] = useState<number[]>(() => {
+    const urlExclude = initialParams.get('exclude');
+    if (!urlExclude) return [];
+    return urlExclude
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(n => parseInt(n, 10))
+      .filter(n => !Number.isNaN(n));
+  });
   const [expandedStage, setExpandedStage] = useState<number | null>(null);
   const [expandedStageCompetitors, setExpandedStageCompetitors] = useState<Record<number, string[]>>({});
   const stageHeaderRefs = useRef<Record<number, HTMLDivElement | null>>({});
-  const [selectedCategory, setSelectedCategory] = useState<string>('Overall');
-  const [appliedCategory, setAppliedCategory] = useState<string>('Overall');
+  const [selectedCategory, setSelectedCategory] = useState<string>(() => initialParams.get('category') || 'Overall');
+  const [appliedCategory, setAppliedCategory] = useState<string>(() => initialParams.get('category') || 'Overall');
   const [competitionName, setCompetitionName] = useState<string>('');
-
-  // Load initial values from URL parameters
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const urlMatchId = params.get('matchId');
-    const urlTypeId = params.get('typeId');
-    const urlDivision = params.get('division');
-    const urlCompetitors = params.get('competitors');
-    const urlExclude = params.get('exclude');
-    const urlCategory = params.get('category');
-    
-    if (urlMatchId) setMatchId(urlMatchId);
-    if (urlTypeId) setTypeId(urlTypeId);
-    if (urlDivision) setDivision(urlDivision);
-    if (urlCompetitors) setSelectedCompetitors(urlCompetitors.split(','));
-    if (urlExclude) {
-      const parsed = urlExclude
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean)
-        .map(n => parseInt(n, 10))
-        .filter(n => !Number.isNaN(n));
-      setExcludedStages(parsed);
-    }
-    if (urlCategory) {
-      setSelectedCategory(urlCategory);
-      setAppliedCategory(urlCategory);
-    }
-
-    // If we have matchId and typeId, construct and populate the SSI URL
-    if (urlMatchId && urlTypeId) {
-      const constructedUrl = `https://shootnscoreit.com/event/${urlTypeId}/${urlMatchId}/live-scores/`;
-      setSsiUrl(constructedUrl);
-    }
-
-    // If we have all required parameters, set shouldFetch to true
-    if (urlMatchId && urlTypeId && (urlDivision || 'all')) {
-      setShouldFetch(true);
-    }
-  }, []); // Empty dependency array means this runs once on mount
+  const [overlayModalCompetitor, setOverlayModalCompetitor] = useState<CompetitorWithTotalScore | null>(null);
+  const [overlayStartStage, setOverlayStartStage] = useState<number | null>(null);
+  const [showOverlayFeature, setShowOverlayFeature] = useState(() => initialParams.get('overlay') === '1');
 
   // Update URL when matchId, typeId, division, selectedCompetitors, excludedStages, or category change
   useEffect(() => {
@@ -154,28 +164,145 @@ function App() {
    * Get the placement (rank) of a competitor on a specific stage
    * Returns the 1-based position and the percentage of max score
    */
-  const getStageStats = (competitorKey: string, stageNumber: number): { placement: number; totalOnStage: number; stagePercent: string } => {
-    // Get all scores for this stage from all competitors
-    const stageScoresForAll = scores
-      .map(c => {
-        const stageScore = c.stageScores.find(s => s.stage === stageNumber);
-        return stageScore ? { key: c.competitorKey, score: stageScore.score, maxScore: stageScore.maxPossibleScore } : null;
-      })
-      .filter((s): s is { key: string; score: number; maxScore: number } => s !== null);
-    
-    // Sort by score descending to get placements
-    const sorted = [...stageScoresForAll].sort((a, b) => b.score - a.score);
-    const placement = sorted.findIndex(s => s.key === competitorKey) + 1;
-    
-    // Calculate stage percentage
-    const myScore = stageScoresForAll.find(s => s.key === competitorKey);
-    const maxScoreOnStage = sorted.length > 0 ? sorted[0].score : 0;
-    const stagePercent = myScore && maxScoreOnStage > 0 
-      ? ((myScore.score / maxScoreOnStage) * 100).toFixed(1) 
-      : '0.0';
-    
-    return { placement, totalOnStage: sorted.length, stagePercent };
-  };
+  const getStageStats = useCallback(
+    (competitorKey: string, stageNumber: number): { placement: number; totalOnStage: number; stagePercent: string } => {
+      const stageScoresForAll = scores
+        .map(c => {
+          const stageScore = c.stageScores.find(s => s.stage === stageNumber);
+          return stageScore ? { key: c.competitorKey, score: stageScore.score, maxScore: stageScore.maxPossibleScore } : null;
+        })
+        .filter((s): s is { key: string; score: number; maxScore: number } => s !== null);
+
+      const sorted = [...stageScoresForAll].sort((a, b) => b.score - a.score);
+      const placement = sorted.findIndex(s => s.key === competitorKey) + 1;
+
+      const myScore = stageScoresForAll.find(s => s.key === competitorKey);
+      const maxScoreOnStage = sorted.length > 0 ? sorted[0].score : 0;
+      const stagePercent = myScore && maxScoreOnStage > 0
+        ? ((myScore.score / maxScoreOnStage) * 100).toFixed(1)
+        : '0.0';
+
+      return { placement, totalOnStage: sorted.length, stagePercent };
+    },
+    [scores],
+  );
+
+  /**
+   * Returns the full ranked list of competitors for an explicit set of stage
+   * numbers (order of the array does not matter for scoring, only membership).
+   */
+  const getVirtualRankings = useCallback(
+    (stageNumbers: number[]): CompetitorWithTotalScore[] => {
+      const set = new Set(stageNumbers);
+      const relevantStages = stages.filter(s => set.has(s.stage) && !excludedStages.includes(s.stage));
+      const categoryParam = appliedCategory === 'Overall' ? undefined : appliedCategory;
+      return calculateCompetitorScores(relevantStages, categoryParam);
+    },
+    [stages, excludedStages, appliedCategory],
+  );
+
+  /**
+   * Builds the shooting order starting from `startStage` and wrapping around.
+   * E.g. stages [1,2,3,4,5,6], startStage=3 → [3,4,5,6,1,2].
+   */
+  const buildRotatedSequence = useCallback(
+    (stageNumbers: number[], startStage: number): number[] => {
+      const sorted = [...stageNumbers].sort((a, b) => a - b);
+      const idx = sorted.indexOf(startStage);
+      if (idx === -1) return sorted;
+      return [...sorted.slice(idx), ...sorted.slice(0, idx)];
+    },
+    [],
+  );
+
+  const openOverlayModal = useCallback((competitor: CompetitorWithTotalScore) => {
+    const earliest = competitor.stageScores.length > 0
+      ? Math.min(...competitor.stageScores.map(s => s.stage))
+      : 1;
+    setOverlayStartStage(earliest);
+    setOverlayModalCompetitor(competitor);
+  }, []);
+
+  const closeOverlayModal = useCallback(() => {
+    setOverlayModalCompetitor(null);
+    setOverlayStartStage(null);
+  }, []);
+
+  const handleDownloadAllOverlays = useCallback(
+    async (competitor: CompetitorWithTotalScore, startStage: number) => {
+      // Build the rotated shooting order: [startStage, …, last, 1, …, startStage-1]
+      const allStageNums = competitor.stageScores.map(s => s.stage);
+      const rotatedSequence = buildRotatedSequence(allStageNums, startStage);
+
+      const padWidth = String(rotatedSequence.length).length;
+      const entries: StageOverlayEntry[] = rotatedSequence.map((stageNum, seqIdx) => {
+        const stageScore = competitor.stageScores.find(s => s.stage === stageNum)!;
+        const stageName = stageScore.stageName || `Stage ${stageNum}`;
+
+        // Stage result params
+        const stageStats = getStageStats(competitor.competitorKey, stageNum);
+        const stageResultParams = {
+          stageName,
+          hitFactor: stageScore.hitFactor,
+          time: stageScore.time,
+          stageScore: stageScore.score,
+          maxPossibleScore: stageScore.maxPossibleScore,
+          hits: stageScore.hits,
+          procedures: stageScore.procedures,
+          stagePercent: stageStats.stagePercent,
+        };
+
+        // Cumulative standings use all stages up to position seqIdx in the rotated order
+        const stagesUpToNow = rotatedSequence.slice(0, seqIdx + 1);
+        const rankingsNow = getVirtualRankings(stagesUpToNow);
+        const posNow = rankingsNow.findIndex(c => c.competitorKey === competitor.competitorKey) + 1;
+        const topScore = rankingsNow.length > 0 ? rankingsNow[0].totalScore : 0;
+        const total = rankingsNow.length;
+
+        // Movement: compare with standings after the previous stage in the rotated order
+        let movement: Movement = 'none';
+        if (seqIdx > 0) {
+          const rankingsPrev = getVirtualRankings(rotatedSequence.slice(0, seqIdx));
+          const posPrev = rankingsPrev.findIndex(c => c.competitorKey === competitor.competitorKey) + 1;
+          if (posNow < posPrev) movement = 'up';
+          else if (posNow > posPrev) movement = 'down';
+        }
+
+        const windowSize = 5;
+        let windowStart = Math.max(0, posNow - 1 - Math.floor(windowSize / 2));
+        if (windowStart + windowSize > total) windowStart = Math.max(0, total - windowSize);
+        const rows: StandingRow[] = rankingsNow.slice(windowStart, windowStart + windowSize).map((c, idx) => ({
+          rank: windowStart + idx + 1,
+          name: c.name,
+          scorePercent: topScore > 0 ? (c.totalScore / topScore) * 100 : 0,
+          isShooter: c.competitorKey === competitor.competitorKey,
+        }));
+
+        const standingsParams = {
+          stageName,
+          stageNumber: stageNum,
+          rows,
+          movement,
+          shooterTotalScore: rankingsNow.find(c => c.competitorKey === competitor.competitorKey)?.totalScore ?? 0,
+          totalCompetitors: total,
+        };
+
+        const seqNum = String(seqIdx + 1).padStart(padWidth, '0');
+        const filePrefix = `${seqNum}-${stageName.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+
+        return { stageResultParams, standingsParams, filePrefix };
+      });
+
+      await downloadAllOverlaysAsZip(competitor.name, entries);
+    },
+    [buildRotatedSequence, getStageStats, getVirtualRankings],
+  );
+
+  const handleModalDownload = useCallback(async () => {
+    if (!overlayModalCompetitor || overlayStartStage === null) return;
+    await handleDownloadAllOverlays(overlayModalCompetitor, overlayStartStage);
+    closeOverlayModal();
+  }, [overlayModalCompetitor, overlayStartStage, handleDownloadAllOverlays, closeOverlayModal]);
 
   const handleUrlPaste = (url: string) => {
     try {
@@ -213,7 +340,7 @@ function App() {
     setLoading(true);
     setError(null);
     try {
-      const baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3001' : '/api';
+      const baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : '/api';
       const response = await fetch(`${baseUrl}/${typeId}/${matchId}/${division}/parse`);
       
       if (!response.ok) {
@@ -312,10 +439,25 @@ function App() {
       };
     }, { A: 0, C: 0, D: 0, M: 0, NS: 0, procedures: 0, time: 0 });
 
+    // Closest rivals for this competitor, computed against the (stage-filtered) field.
+    // Only runs for the expanded competitor thanks to the early return above.
+    const filteredStages = stages.filter(s => !excludedStages.includes(s.stage));
+    const rivals: RivalResult[] = findClosestRivals(competitor.competitorKey, scores, filteredStages, 5);
+    const projection: ProjectedFinish | null = computeProjectedFinish(competitor.competitorKey, scores, filteredStages);
+
     return (
       <div className="stage-scores">
         <div className="sticky-competitor-name">
           <h3>{index + 1}. {competitor.name} {competitor.category && competitor.category !== '-' && `(${getCategoryDisplayName(competitor.category)}) `}{competitor.division}</h3>
+          {showOverlayFeature && (
+            <button
+              className="overlay-btn download-all-btn"
+              onClick={() => openOverlayModal(competitor)}
+              title="Configure and download all stage overlay images as a ZIP file"
+            >
+              Download all overlays (.zip)
+            </button>
+          )}
         </div>
         <div className="total-hits">
           <div className="hits-container">
@@ -390,6 +532,88 @@ function App() {
             </div>
           );
         })}
+        {projection && (
+          <div className="competitor-projection">
+            <div className="competitor-projection-header">
+              <h4>Projected finish</h4>
+              <span className="rivals-ref-pct">Avg stage %: {projection.refAvgPct.toFixed(1)}%</span>
+            </div>
+            <div className="projection-headline">
+              <span
+                className={`rival-confidence-dot rival-confidence-${projection.confidence}`}
+                title={`Confidence: ${projection.confidence} — based on ${projection.currentStagesShot} of ${projection.totalStages} stages shot`}
+              />
+              <span className="projection-headline-value">Projected top {projection.projectedPercentile.toFixed(0)}%</span>
+              <span className="projection-headline-pos">
+                ≈ {ordinal(projection.projectedPosition)} of {projection.startedCount} shooting so far
+              </span>
+            </div>
+            <div className="projection-contrast">
+              Currently {ordinal(projection.currentPosition)} ({projection.currentStagesShot} of {projection.totalStages} stages)
+              {' → projected '}
+              <span className="projection-target">{ordinal(projection.projectedPosition)}</span>
+            </div>
+            {projection.projectedBestPosition !== projection.projectedWorstPosition && (
+              <div className="projection-range">
+                Range: top {projection.projectedBestPercentile.toFixed(0)}%–{projection.projectedWorstPercentile.toFixed(0)}%
+                {' ('}{ordinal(projection.projectedBestPosition)}–{ordinal(projection.projectedWorstPosition)}{')'}
+              </div>
+            )}
+            <div className="projection-pct">{projection.projectedPctOfWinner.toFixed(1)}% of projected winner</div>
+            <p className="projection-caveat">
+              Based on {projection.startedCount} competitor{projection.startedCount === 1 ? '' : 's'} who&apos;ve started — others may still enter.
+            </p>
+          </div>
+        )}
+        {rivals.length > 0 && (
+          <div className="competitor-rivals">
+            <div className="competitor-rivals-header">
+              <h4>Closest rivals</h4>
+              <span className="rivals-ref-pct">Avg stage %: {rivals[0].refAvgPct.toFixed(1)}%</span>
+            </div>
+            <p className="rivals-confidence-legend">
+              Dot shows how reliable each match is given the stages shot so far —
+              <span className="rival-confidence-dot rival-confidence-high" /> solid,
+              <span className="rival-confidence-dot rival-confidence-medium" /> fair,
+              <span className="rival-confidence-dot rival-confidence-low" /> thin.
+            </p>
+            <ul className="competitor-rivals-list">
+              {rivals.map((rival) => {
+                const placement = scores.findIndex(c => c.competitorKey === rival.competitor.competitorKey) + 1;
+                const above = rival.avgPct > rival.refAvgPct;
+                const confidenceTitle = `Confidence: ${rival.confidence} — rival average based on ${rival.rivalStages} stage${rival.rivalStages === 1 ? '' : 's'}, ${rival.sharedStages} shared with ${competitor.name} (who has ${rival.refStages} stage${rival.refStages === 1 ? '' : 's'})`;
+                return (
+                  <li key={rival.competitor.competitorKey} className={`rival-row rival-conf-${rival.confidence}`}>
+                    <div className="rival-main-row">
+                      <span
+                        className={`rival-confidence-dot rival-confidence-${rival.confidence}`}
+                        title={confidenceTitle}
+                      />
+                      <span className="rival-placement">#{placement}</span>
+                      <span className="rival-name">{rival.competitor.name}</span>
+                      <span className="rival-avg-pct">{rival.avgPct.toFixed(1)}%</span>
+                    </div>
+                    <div className="rival-sub-row">
+                      <span className="rival-division">{rival.competitor.division}</span>
+                      <span className={`rival-gap ${above ? 'rival-gap-above' : 'rival-gap-below'}`}>
+                        {above ? '+' : '-'}{rival.gap.toFixed(1)}%
+                      </span>
+                      {rival.sharedStages === 0 ? (
+                        <span className="rival-badge rival-badge-new" title="No shared stages — similarity estimated from independent stage performance">
+                          new rival
+                        </span>
+                      ) : (
+                        <span className="rival-badge rival-badge-shared" title={`${rival.sharedStages} stage${rival.sharedStages > 1 ? 's' : ''} in common`}>
+                          {rival.sharedStages} shared
+                        </span>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
       </div>
     );
   };
@@ -423,6 +647,40 @@ function App() {
     );
   };
 
+  // Render a row in the projected standings (ranked by avg stage %, with movement vs current)
+  const renderProjectedListItem = (entry: ProjectedStandingEntry) => {
+    const { competitor, projectedPosition, confidence, projectedPctOfWinner, avgPct } = entry;
+    return (
+      <li key={competitor.competitorKey} className={`projected-row${confidence === 'low' ? ' is-low' : ''}`}>
+        <div className="competitor-row">
+          <span className="projected-left">
+            <span
+              className={`rival-confidence-dot rival-confidence-${confidence}`}
+              title={`Confidence: ${confidence} — based on ${entry.stagesShot} stage${entry.stagesShot === 1 ? '' : 's'} shot`}
+            />
+            <span className="projected-pos">#{projectedPosition}</span>
+            <span className="competitor-name" onClick={() => toggleCompetitorDetails(competitor.competitorKey)}>
+              {competitor.name} <span className="projected-division">({competitor.division})</span>
+            </span>
+          </span>
+          <div className="competitor-actions">
+            <span className="projected-metric">
+              {projectedPctOfWinner.toFixed(1)}% <span className="projected-avg">avg {avgPct.toFixed(1)}%</span>
+            </span>
+            <span
+              className={`add-button ${selectedCompetitors.includes(competitor.competitorKey) ? 'selected' : ''}`}
+              onClick={() => toggleCompetitor(competitor.competitorKey)}
+              title={selectedCompetitors.includes(competitor.competitorKey) ? 'Remove from comparison' : 'Add to comparison'}
+            >
+              <FontAwesomeIcon icon={selectedCompetitors.includes(competitor.competitorKey) ? faUserMinus : faUserPlus} />
+            </span>
+          </div>
+        </div>
+        {renderStageScores(competitor, projectedPosition - 1)}
+      </li>
+    );
+  };
+
   // Update comparison and scores when stages, excludedStages, selectedCompetitors or appliedCategory change
   useEffect(() => {
     const filteredStages = stages.filter(s => !excludedStages.includes(s.stage));
@@ -430,6 +688,13 @@ function App() {
     setComparison(compareCompetitors(filteredStages, selectedCompetitors, categoryParam));
     setScores(calculateCompetitorScores(filteredStages, categoryParam));
   }, [stages, selectedCompetitors, excludedStages, appliedCategory]);
+
+  // Projected standings: the full field re-ranked by avg stage %. Inherits the same
+  // division/category/excluded-stage filters as `scores`.
+  const projectedStandings = useMemo(() => {
+    const filtered = stages.filter(s => !excludedStages.includes(s.stage));
+    return computeProjectedStandings(scores, filtered);
+  }, [scores, stages, excludedStages]);
 
   const availableStageNumbers = Array.from(new Set(stages.map(s => s.stage))).sort((a, b) => a - b);
   // Build a map of stage number to stage name for use in the UI
@@ -688,6 +953,49 @@ function App() {
           })}
         </div>
       )}
+      {projectedStandings.length > 0 && (
+        <div className="results projected-standings" style={{ marginTop: '1rem' }}>
+          <h2>Projected standings</h2>
+          <p className="rivals-confidence-legend">
+            Field re-ranked by average stage % (projected finish).
+            Dot shows reliability given stages shot so far —
+            <span className="rival-confidence-dot rival-confidence-high" /> solid,
+            <span className="rival-confidence-dot rival-confidence-medium" /> fair,
+            <span className="rival-confidence-dot rival-confidence-low" /> thin.
+          </p>
+          <ul>
+            {projectedStandings.map(entry => renderProjectedListItem(entry))}
+          </ul>
+        </div>
+      )}
+      {showOverlayFeature && overlayModalCompetitor && overlayStartStage !== null && (
+        <OverlaySettingsModal
+          competitor={overlayModalCompetitor}
+          startStage={overlayStartStage}
+          availableStages={overlayModalCompetitor.stageScores
+            .map(s => ({ value: s.stage, label: s.stageName || `Stage ${s.stage}` }))
+            .sort((a, b) => a.value - b.value)}
+          onStartStageChange={setOverlayStartStage}
+          onDownload={handleModalDownload}
+          onClose={closeOverlayModal}
+        />
+      )}
+      <footer className="app-footer">
+        <a
+          className="feature-toggle-link"
+          href={(() => {
+            const params = new URLSearchParams(window.location.search);
+            if (showOverlayFeature) {
+              params.delete('overlay');
+            } else {
+              params.set('overlay', '1');
+            }
+            return `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
+          })()}
+        >
+          {showOverlayFeature ? 'Hide image tools' : '·'}
+        </a>
+      </footer>
     </div>
   );
 }

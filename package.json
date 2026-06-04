@@ -21,7 +21,10 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
-    "test:e2e:debug": "playwright test --debug"
+    "test:e2e:debug": "playwright test --debug",
+    "mock-api": "src/server/node_modules/.bin/ts-node-dev --respawn --transpile-only --project src/mock-api/tsconfig.json src/mock-api/index.ts",
+    "mock-api:fetch": "src/server/node_modules/.bin/ts-node --project src/mock-api/tsconfig.json src/mock-api/fetch-data.ts",
+    "mock-api:time": "scripts/mock-time.sh"
   },
   "keywords": [
     "ipsc",

@@ -38,6 +38,12 @@ export AWS_ACCOUNT_ID=your-account-id  # Will be auto-detected if not set
 export LIGHTSAIL_SERVICE_NAME=livescore-app
 
 # GraphQL API settings (defaults shown)
+export GRAPHQL_API_URL=https://shootnscoreit.com/graphql/
+export GRAPHQL_API_KEY=your-ssi-api-key            # Required (x-api-key header)
+export GRAPHQL_AUTH_TOKEN=                          # Optional bearer token
+export GRAPHQL_SESSION_COOKIE=                      # Optional session cookie
+export GRAPHQL_AUTH_USERNAME=                       # Optional JWT login username
+export GRAPHQL_AUTH_PASSWORD=                       # Optional JWT login password
 export GRAPHQL_TIMEOUT=60000                    # Request timeout in ms
 export GRAPHQL_CACHE_MAX_AGE_MS=259200000       # 3 days cache TTL
 export GRAPHQL_CACHE_IDLE_EVICTION_MS=3600000   # Evict after 1 hour idle
@@ -152,6 +158,12 @@ Or use the AWS Console to update the container service deployment.
 
 #### GraphQL API Settings
 
+- `GRAPHQL_API_URL`: `https://shootnscoreit.com/graphql/` (GraphQL endpoint)
+- `GRAPHQL_API_KEY`: required SSI key used as `x-api-key`
+- `GRAPHQL_AUTH_TOKEN`: optional bearer token for authenticated SSI requests
+- `GRAPHQL_SESSION_COOKIE`: optional cookie header for authenticated SSI requests
+- `GRAPHQL_AUTH_USERNAME`: optional SSI username for JWT login mutation
+- `GRAPHQL_AUTH_PASSWORD`: optional SSI password for JWT login mutation
 - `GRAPHQL_TIMEOUT`: `60000` (request timeout in milliseconds, default 60 seconds)
 - `GRAPHQL_CACHE_MAX_AGE_MS`: `259200000` (cache TTL, default 3 days)
 - `GRAPHQL_CACHE_IDLE_EVICTION_MS`: `3600000` (evict inactive entries after 1 hour)

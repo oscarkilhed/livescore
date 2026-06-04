@@ -315,4 +315,35 @@ test.describe('SSI Flow', () => {
     const hasError = await errorMessage.isVisible().catch(() => false);
     expect(hasError).toBe(false);
   });
+
+  // Regression test: the `division` URL param must be honored on load and must
+  // not be clobbered back to 'all' by the URL-writeback effect. Previously the
+  // division select reset to "Overall (division)" and the URL rewrote itself to
+  // division=all, while matchId/typeId loaded fine.
+  for (const division of ['hg33', 'hg18']) {
+    test(`should respect the division=${division} URL param on load`, async ({ page }) => {
+      const parseRequests: string[] = [];
+      page.on('request', (req) => {
+        if (/\/parse$/.test(new URL(req.url()).pathname)) parseRequests.push(req.url());
+      });
+
+      await page.goto(`/?matchId=21833&typeId=22&division=${division}`);
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(1000);
+
+      // The division select (first .division-select) should reflect the requested
+      // division, not reset to the 'all' default.
+      const divisionSelect = page.locator('select.division-select').first();
+      await expect(divisionSelect).toHaveValue(division);
+
+      // The URL must keep the requested division and must not be rewritten to all.
+      const url = page.url();
+      expect(url).toContain(`division=${division}`);
+      expect(url).not.toContain('division=all');
+
+      // Data must be fetched for the requested division, not 'all'.
+      expect(parseRequests.some((u) => u.includes(`/${division}/parse`))).toBe(true);
+      expect(parseRequests.some((u) => u.includes('/all/parse'))).toBe(false);
+    });
+  }
 });
