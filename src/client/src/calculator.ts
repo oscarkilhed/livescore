@@ -247,13 +247,46 @@ export function calculateCompetitorScores(stages: Stage[], category?: string): C
 }
 
 /**
- * Average stage score percentage for a competitor — their hit factor as a percentage
- * of the stage leader's, meaned across the stages they have shot. This is the skill
- * proxy that powers both the rivals and projection features. Returns the per-stage
- * `pcts` list too, so callers can measure stage-to-stage consistency (variance).
+ * Point value of a stage (round count × 5) — how much it contributes to the official
+ * total. Prefers the precomputed `maxPossibleScore`, else derives it the same way
+ * {@link calculateMaxPossibleScores} does (first competitor's A+C+D+M × 5). Returns 0
+ * for a stage with no data.
  */
-export function getCompetitorAvgPct(competitorKey: string, stages: Stage[]): { avg: number; count: number; pcts: number[] } | null {
+function stageWeight(stage: Stage): number {
+    if (typeof stage.maxPossibleScore === 'number' && stage.maxPossibleScore > 0) {
+        return stage.maxPossibleScore;
+    }
+    const c = stage.competitors[0];
+    if (!c) return 0;
+    return (c.hits.A + c.hits.C + c.hits.D + c.hits.M) * 5;
+}
+
+/**
+ * Best estimate of the match's total points: summed stage weights over stages that
+ * have at least one competitor (un-shot stages have unknown size). Stabilizes to the
+ * true total as every stage gets data.
+ */
+function matchTotalPoints(stages: Stage[]): number {
+    return stages.reduce((sum, s) => sum + (s.competitors.length > 0 ? stageWeight(s) : 0), 0);
+}
+
+/**
+ * Points-weighted average stage percentage for a competitor — each stage's
+ * `(hitFactor/maxHF)*100` weighted by its point value, so bigger stages count more
+ * (matching how the official total accumulates). This is the skill proxy behind the
+ * rivals and projection features. Note this is a normalized *mean*, so it does not
+ * penalize shooting small stages; it only differs from a flat mean when a competitor
+ * performs differently on big vs small stages.
+ *
+ * Returns the per-stage `pcts` and aligned `weights` so callers can compute a
+ * weighted spread and completed-points fraction.
+ */
+export function getCompetitorAvgPct(
+    competitorKey: string,
+    stages: Stage[],
+): { avg: number; count: number; pcts: number[]; weights: number[] } | null {
     const pcts: number[] = [];
+    const weights: number[] = [];
     for (const stage of stages) {
         const competitor = stage.competitors.find(c => c.competitorKey === competitorKey);
         if (!competitor) continue;
@@ -261,10 +294,15 @@ export function getCompetitorAvgPct(competitorKey: string, stages: Stage[]): { a
         const maxHF = validHFs.length > 0 ? Math.max(...validHFs) : 0;
         if (maxHF > 0) {
             pcts.push((competitor.hitFactor / maxHF) * 100);
+            weights.push(stageWeight(stage) || 1); // defensive: never 0 for a scored stage
         }
     }
     if (pcts.length === 0) return null;
-    return { avg: pcts.reduce((a, b) => a + b, 0) / pcts.length, count: pcts.length, pcts };
+    const totalW = weights.reduce((a, b) => a + b, 0);
+    const avg = totalW > 0
+        ? pcts.reduce((s, p, i) => s + p * weights[i], 0) / totalW
+        : pcts.reduce((a, b) => a + b, 0) / pcts.length;
+    return { avg, count: pcts.length, pcts, weights };
 }
 
 const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
@@ -324,6 +362,8 @@ export function findClosestRivals(
             sharedStages,
             rivalStages: rival.count,
             refStages: ref.count,
+            // Rivals' avgPct is points-weighted (via getCompetitorAvgPct), but confidence
+            // stays count/overlap-based: overlap is inherently a stage-count question.
             confidence: computeConfidence(Math.min(ref.count, rival.count), sharedStages, totalStages),
         });
     }
@@ -342,10 +382,10 @@ export function findClosestRivals(
  * The live feed only contains competitors who have already shot, and the eventual
  * field size is unknown, so the headline metric is a percentile (rank / started-count),
  * which is unbiased as more competitors start (assuming the started field is a
- * representative sample). A best/worst range is derived from the competitor's own
- * stage-to-stage consistency (standard error of their stage %s). Confidence reuses
- * {@link computeConfidence} with sharedStages = the competitor's own stage count, so it
- * is driven purely by sample size — the intended "few stages = low confidence" semantics.
+ * representative sample). Confidence and the best/worst range are driven by the
+ * fraction of the match completed *by points* (not stage count), so a competitor who
+ * has only shot small stages is correctly shown as less certain — the range widens by
+ * the unseen-points fraction, bounded by their own stage-to-stage spread.
  *
  * @param referenceKey - Competitor to project.
  * @param scores - Full ranked standings (total-score order); used for currentPosition.
@@ -365,7 +405,7 @@ export function computeProjectedFinish(
     // The projection universe: every competitor who has shot at least one scored stage.
     const field = scores
         .map(c => getCompetitorAvgPct(c.competitorKey, stages))
-        .filter((r): r is { avg: number; count: number; pcts: number[] } => r !== null);
+        .filter((r): r is { avg: number; count: number; pcts: number[]; weights: number[] } => r !== null);
     const startedCount = field.length;
 
     // Rank by avg stage %; strict `>` lets ties share the better (lower) rank.
@@ -375,17 +415,30 @@ export function computeProjectedFinish(
     const maxAvg = field.reduce((m, f) => Math.max(m, f.avg), 0);
     const projectedPctOfWinner = maxAvg > 0 ? (ref.avg / maxAvg) * 100 : 0;
 
-    // Range band from the competitor's own consistency (standard error of the mean).
+    // How much of the match (by points) this competitor has completed. Drives both
+    // confidence and how wide the range is — six small stages is less of the result
+    // than six big ones, even though it's the same stage count.
+    const sumW = ref.weights.reduce((a, b) => a + b, 0);
+    const f = clamp01(matchTotalPoints(stages) > 0 ? sumW / matchTotalPoints(stages) : 0);
+
+    // Range: weighted spread of their stage %s, widened by the unseen fraction of the
+    // match. At f=1 this is just the (weighted) standard error of the mean; as f→0 it
+    // approaches their full stage-to-stage spread. Collapses with <2 stages.
     let stdErr = 0;
-    if (ref.count >= 2) {
-        const mean = ref.avg;
-        const variance = ref.pcts.reduce((s, p) => s + (p - mean) ** 2, 0) / (ref.count - 1);
-        stdErr = Math.sqrt(variance) / Math.sqrt(ref.count);
+    if (ref.count >= 2 && sumW > 0) {
+        const weightedVar = ref.pcts.reduce((s, p, i) => s + ref.weights[i] * (p - ref.avg) ** 2, 0) / sumW;
+        const sw = Math.sqrt(weightedVar);
+        const nEff = sumW ** 2 / ref.weights.reduce((s, w) => s + w * w, 0); // Kish effective N
+        stdErr = sw * Math.sqrt((f * f) / Math.max(nEff, 1) + (1 - f) ** 2);
     }
     const projectedBestPosition = rankAt(ref.avg + stdErr);
     const projectedWorstPosition = rankAt(ref.avg - stdErr);
 
     const toPercentile = (pos: number): number => (startedCount > 0 ? (pos / startedCount) * 100 : 0);
+
+    // Confidence keyed off completed-points fraction (effective stages-by-points),
+    // not raw stage count — equal-weight stages reduce this to count-based behaviour.
+    const effStages = f * totalStages;
 
     const currentPosition = 1 + scores.findIndex(c => c.competitorKey === referenceKey);
 
@@ -403,7 +456,7 @@ export function computeProjectedFinish(
         refAvgPct: ref.avg,
         projectedPctOfWinner,
         startedCount,
-        confidence: computeConfidence(ref.count, ref.count, totalStages),
+        confidence: computeConfidence(effStages, effStages, totalStages),
         stdErr,
     };
 }
@@ -413,8 +466,9 @@ export function computeProjectedFinish(
  * that corrects the mid-competition bias of the accumulated-total standings: competitors
  * who have shot fewer stages are no longer pushed down just for having a smaller total.
  *
- * Each entry carries a sample-size `confidence` so thin-data entries can be flagged.
- * Only competitors who have shot at least one scored stage are included.
+ * Each entry carries a `confidence` (driven by completed-points fraction, so thin /
+ * small-stage-only data is flagged) and is included only if the competitor has shot at
+ * least one scored stage.
  *
  * @param scores - Live standings (any order); the started subset is re-ranked by avg %.
  * @param stages - Stages to rank against (already stage/category filtered by caller).
@@ -425,33 +479,37 @@ export function computeProjectedStandings(
     stages: Stage[],
 ): ProjectedStandingEntry[] {
     const totalStages = new Set(stages.map(s => s.stage)).size;
+    const totalPoints = matchTotalPoints(stages);
 
     // Started field: competitors who have shot at least one scored stage.
     const field = scores
         .map(c => {
             const a = getCompetitorAvgPct(c.competitorKey, stages);
-            return a ? { competitor: c, avg: a.avg, count: a.count } : null;
+            if (!a) return null;
+            const sumW = a.weights.reduce((s, w) => s + w, 0);
+            return { competitor: c, avg: a.avg, count: a.count, pointsFrac: totalPoints > 0 ? clamp01(sumW / totalPoints) : 0 };
         })
-        .filter((x): x is { competitor: CompetitorWithTotalScore; avg: number; count: number } => x !== null);
+        .filter((x): x is { competitor: CompetitorWithTotalScore; avg: number; count: number; pointsFrac: number } => x !== null);
 
-    const maxAvg = field.reduce((m, f) => Math.max(m, f.avg), 0);
+    const maxAvg = field.reduce((m, e) => Math.max(m, e.avg), 0);
     const sorted = [...field].sort((a, b) => b.avg - a.avg);
 
     // Competition ranking: ties share the better rank, the next distinct value skips ahead.
     let rank = 0;
     let prevAvg = Number.POSITIVE_INFINITY;
-    return sorted.map((f, idx) => {
-        if (f.avg < prevAvg) {
+    return sorted.map((e, idx) => {
+        if (e.avg < prevAvg) {
             rank = idx + 1;
-            prevAvg = f.avg;
+            prevAvg = e.avg;
         }
+        const effStages = e.pointsFrac * totalStages;
         return {
-            competitor: f.competitor,
-            avgPct: f.avg,
-            stagesShot: f.count,
+            competitor: e.competitor,
+            avgPct: e.avg,
+            stagesShot: e.count,
             projectedPosition: rank,
-            projectedPctOfWinner: maxAvg > 0 ? (f.avg / maxAvg) * 100 : 0,
-            confidence: computeConfidence(f.count, f.count, totalStages),
+            projectedPctOfWinner: maxAvg > 0 ? (e.avg / maxAvg) * 100 : 0,
+            confidence: computeConfidence(effStages, effStages, totalStages),
         };
     });
 }
