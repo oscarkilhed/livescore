@@ -53,12 +53,32 @@ const getCategoryDisplayName = (code: string): string => {
 };
 
 /**
+ * Hit chip class — penalty hits (misses, no-shoots, procedures) that actually
+ * scored against the shooter are flagged red so they stand out at a glance.
+ */
+const PENALTY_TYPES = new Set(['M', 'NS', 'Proc']);
+const hitChipClass = (type: string, count: number): string =>
+  PENALTY_TYPES.has(type) && count > 0 ? 'hit hit-penalty' : 'hit';
+
+/**
  * Format a 1-based rank as an ordinal string (1 -> "1st", 2 -> "2nd", 11 -> "11th").
  */
 const ordinal = (n: number): string => {
   const s = ['th', 'st', 'nd', 'rd'];
   const v = n % 100;
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
+};
+
+/**
+ * The three result views the user pages between (swipe on touch, tap a tab on
+ * desktop). Order matters: it defines swipe direction.
+ */
+const VIEWS = ['standings', 'stages', 'projected'] as const;
+type ViewKey = (typeof VIEWS)[number];
+const VIEW_LABELS: Record<ViewKey, string> = {
+  standings: 'Standings',
+  stages: 'Stages',
+  projected: 'Projected',
 };
 
 function App() {
@@ -115,6 +135,38 @@ function App() {
   const [overlayModalCompetitor, setOverlayModalCompetitor] = useState<CompetitorWithTotalScore | null>(null);
   const [overlayStartStage, setOverlayStartStage] = useState<number | null>(null);
   const [showOverlayFeature, setShowOverlayFeature] = useState(() => initialParams.get('overlay') === '1');
+  const [activeView, setActiveView] = useState<ViewKey>(() => {
+    const v = initialParams.get('view');
+    return v === 'stages' || v === 'projected' ? v : 'standings';
+  });
+  // Direction of the last view change, used to pick the slide-in animation.
+  const [slideDir, setSlideDir] = useState<'left' | 'right'>('left');
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  const goToView = (next: ViewKey) => {
+    if (next === activeView) return;
+    setSlideDir(VIEWS.indexOf(next) > VIEWS.indexOf(activeView) ? 'left' : 'right');
+    setActiveView(next);
+  };
+
+  const handleViewTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    touchStartRef.current = { x: t.clientX, y: t.clientY };
+  };
+
+  const handleViewTouchEnd = (e: React.TouchEvent) => {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    // Require a deliberate, mostly-horizontal swipe so we don't hijack scrolling.
+    if (Math.abs(dx) < 60 || Math.abs(dx) <= Math.abs(dy)) return;
+    const idx = VIEWS.indexOf(activeView);
+    const nextIdx = dx < 0 ? idx + 1 : idx - 1;
+    if (nextIdx >= 0 && nextIdx < VIEWS.length) goToView(VIEWS[nextIdx]);
+  };
 
   // Update URL when matchId, typeId, division, selectedCompetitors, excludedStages, or category change
   useEffect(() => {
@@ -137,10 +189,15 @@ function App() {
     } else {
       params.delete('category');
     }
-    
+    if (activeView !== 'standings') {
+      params.set('view', activeView);
+    } else {
+      params.delete('view');
+    }
+
     const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
     window.history.replaceState({}, '', newUrl);
-  }, [matchId, typeId, division, selectedCompetitors, excludedStages, appliedCategory]);
+  }, [matchId, typeId, division, selectedCompetitors, excludedStages, appliedCategory, activeView]);
 
   const getCommonStages = (competitors: CompetitorWithTotalScore[]): number[] => {
     if (competitors.length === 0) return [];
@@ -462,31 +519,31 @@ function App() {
         <div className="total-hits">
           <div className="hits-container">
             <div className="hit">
-              <span className="hit-type">A:</span>
+              <span className="hit-type">A</span>
               <span className="hit-count">{totalHits.A}</span>
             </div>
             <div className="hit">
-              <span className="hit-type">C:</span>
+              <span className="hit-type">C</span>
               <span className="hit-count">{totalHits.C}</span>
             </div>
             <div className="hit">
-              <span className="hit-type">D:</span>
+              <span className="hit-type">D</span>
               <span className="hit-count">{totalHits.D}</span>
             </div>
-            <div className="hit">
-              <span className="hit-type">M:</span>
+            <div className={hitChipClass('M', totalHits.M)}>
+              <span className="hit-type">M</span>
               <span className="hit-count">{totalHits.M}</span>
             </div>
-            <div className="hit">
-              <span className="hit-type">NS:</span>
+            <div className={hitChipClass('NS', totalHits.NS)}>
+              <span className="hit-type">NS</span>
               <span className="hit-count">{totalHits.NS}</span>
             </div>
-            <div className="hit">
-              <span className="hit-type">Proc:</span>
+            <div className={hitChipClass('Proc', totalHits.procedures)}>
+              <span className="hit-type">Proc</span>
               <span className="hit-count">{totalHits.procedures}</span>
             </div>
             <div className="hit">
-              <span className="hit-type">Time:</span>
+              <span className="hit-type">Time</span>
               <span className="hit-count">{totalHits.time.toFixed(2)}s</span>
             </div>
           </div>
@@ -496,37 +553,27 @@ function App() {
           const stageStats = getStageStats(competitor.competitorKey, stageScore.stage);
           return (
             <div key={stageScore.stage} className="stage">
-              <div className="stage-header">
-                <div className="stage-header-row">
-                  <h4>{stageScore.stageName || `Stage ${stageScore.stage}`}</h4>
-                  <div className="stage-placement">
-                    #{stageStats.placement}/{stageStats.totalOnStage} ({stageStats.stagePercent}%)
-                  </div>
-                </div>
-                <div className="stage-header-row stage-stats-row">
-                  <div>
-                    Score: <span className="stage-score">{(stageScore.score ?? 0).toFixed(2)} / {stageScore.maxPossibleScore ? (stageScore.maxPossibleScore).toFixed(2) : 'Unknown'}</span>
-                  </div>
-                  <div>
-                    HF: <span className="hit-factor">{stageScore.hitFactor?.toFixed(4) || 'N/A'}</span>
-                  </div>
-                </div>
+              <div className="stage-row">
+                <span className="stage-name">{stageScore.stageName || `Stage ${stageScore.stage}`}</span>
+                <span className="stage-placement">
+                  #{stageStats.placement}/{stageStats.totalOnStage} · {stageStats.stagePercent}%
+                </span>
               </div>
-              <div className="stage-details">
-                <div className="stage-time">Time: {stageScore.time?.toFixed(2)}s</div>
-                <div className="stage-content">
-                  <div className="hits-container">
-                    {Object.entries(safeHits).map(([type, count]) => (
-                      <div key={type} className="hit">
-                        <span className="hit-type">{type}:</span>
-                        <span className="hit-count">{count}</span>
-                      </div>
-                    ))}
-                    <div className="hit">
-                      <span className="hit-type">Proc:</span>
-                      <span className="hit-count">{stageScore.procedures}</span>
-                    </div>
+              <div className="stage-metrics">
+                <span>HF <b>{stageScore.hitFactor?.toFixed(4) || 'N/A'}</b></span>
+                <span><b>{(stageScore.score ?? 0).toFixed(2)}</b> / {stageScore.maxPossibleScore ? stageScore.maxPossibleScore.toFixed(2) : '—'}</span>
+                <span><b>{stageScore.time?.toFixed(2)}</b>s</span>
+              </div>
+              <div className="hits-container">
+                {Object.entries(safeHits).map(([type, count]) => (
+                  <div key={type} className={hitChipClass(type, count)}>
+                    <span className="hit-type">{type}</span>
+                    <span className="hit-count">{count}</span>
                   </div>
+                ))}
+                <div className={hitChipClass('Proc', stageScore.procedures ?? 0)}>
+                  <span className="hit-type">Proc</span>
+                  <span className="hit-count">{stageScore.procedures}</span>
                 </div>
               </div>
             </div>
@@ -568,7 +615,7 @@ function App() {
         {rivals.length > 0 && (
           <div className="competitor-rivals">
             <div className="competitor-rivals-header">
-              <h4>Closest rivals</h4>
+              <h4>Potential rivals</h4>
               <span className="rivals-ref-pct">Avg stage %: {rivals[0].refAvgPct.toFixed(1)}%</span>
             </div>
             <p className="rivals-confidence-legend">
@@ -623,21 +670,26 @@ function App() {
     return (
       <li key={competitor.competitorKey}>
         <div className="competitor-row">
-          <span 
-            className="competitor-name" 
-            onClick={() => toggleCompetitorDetails(competitor.competitorKey)}
-          >
-            {index + 1}. {competitor.name}
+          <span className="row-left">
+            <span className="rank">#{index + 1}</span>
+            <span
+              className="competitor-name"
+              onClick={() => toggleCompetitorDetails(competitor.competitorKey)}
+            >
+              {competitor.name} <span className="row-division">({competitor.division})</span>
+            </span>
           </span>
           <div className="competitor-actions">
-            <span>{competitor.totalScore.toFixed(2)} ({calculatePercentage(competitor.totalScore, highestScore)}%)</span>
-            <span 
+            <span className="metric">
+              {calculatePercentage(competitor.totalScore, highestScore)}% <span className="metric-sub">{competitor.totalScore.toFixed(2)}</span>
+            </span>
+            <span
               className={`add-button ${selectedCompetitors.includes(competitor.competitorKey) ? 'selected' : ''}`}
               onClick={() => toggleCompetitor(competitor.competitorKey)}
               title={selectedCompetitors.includes(competitor.competitorKey) ? "Remove from comparison" : "Add to comparison"}
             >
-              <FontAwesomeIcon 
-                icon={selectedCompetitors.includes(competitor.competitorKey) ? faUserMinus : faUserPlus} 
+              <FontAwesomeIcon
+                icon={selectedCompetitors.includes(competitor.competitorKey) ? faUserMinus : faUserPlus}
               />
             </span>
           </div>
@@ -653,19 +705,19 @@ function App() {
     return (
       <li key={competitor.competitorKey} className={`projected-row${confidence === 'low' ? ' is-low' : ''}`}>
         <div className="competitor-row">
-          <span className="projected-left">
+          <span className="row-left">
             <span
               className={`rival-confidence-dot rival-confidence-${confidence}`}
               title={`Confidence: ${confidence} — based on ${entry.stagesShot} stage${entry.stagesShot === 1 ? '' : 's'} shot`}
             />
-            <span className="projected-pos">#{projectedPosition}</span>
+            <span className="rank">#{projectedPosition}</span>
             <span className="competitor-name" onClick={() => toggleCompetitorDetails(competitor.competitorKey)}>
-              {competitor.name} <span className="projected-division">({competitor.division})</span>
+              {competitor.name} <span className="row-division">({competitor.division})</span>
             </span>
           </span>
           <div className="competitor-actions">
-            <span className="projected-metric">
-              {projectedPctOfWinner.toFixed(1)}% <span className="projected-avg">avg {avgPct.toFixed(1)}%</span>
+            <span className="metric">
+              {projectedPctOfWinner.toFixed(1)}% <span className="metric-sub">avg {avgPct.toFixed(1)}%</span>
             </span>
             <span
               className={`add-button ${selectedCompetitors.includes(competitor.competitorKey) ? 'selected' : ''}`}
@@ -800,10 +852,10 @@ function App() {
         </form>
       </div>
       {competitionName && (
-        <h3 className="competition-name" style={{ margin: '1rem 0 0.5rem', paddingLeft: '0.75rem', fontWeight: 500 }}>{competitionName}</h3>
+        <h3 className="competition-name">{competitionName}</h3>
       )}
       <div className="control-panel">
-        <label style={{ display: 'block', marginBottom: 6, fontWeight: 600 }}>Compare competitors</label>
+        <label>Compare competitors</label>
         <Select
           isMulti
           options={competitorOptions}
@@ -812,8 +864,8 @@ function App() {
           placeholder="Search competitors to add"
           classNamePrefix="rs"
         />
-        <div style={{ height: 12 }} />
-        <label style={{ display: 'block', marginBottom: 6, fontWeight: 600 }}>Exclude stages</label>
+        <div className="control-panel-spacer" />
+        <label>Exclude stages</label>
         <Select
           isMulti
           options={stageOptions}
@@ -826,49 +878,71 @@ function App() {
       {loading && <p className="loading">Loading...</p>}
       {error && <p className="error">{error}</p>}
       {scores.length > 0 && (
+        <>
+          <div className="view-tabs" role="tablist">
+            {VIEWS.map(v => (
+              <button
+                key={v}
+                type="button"
+                role="tab"
+                aria-selected={activeView === v}
+                className={`view-tab ${activeView === v ? 'active' : ''}`}
+                onClick={() => goToView(v)}
+              >
+                {VIEW_LABELS[v]}
+              </button>
+            ))}
+          </div>
+          <div
+            className="view-viewport"
+            onTouchStart={handleViewTouchStart}
+            onTouchEnd={handleViewTouchEnd}
+          >
+            <div key={activeView} className={`view-panel slide-${slideDir}`}>
+              {activeView === 'standings' && (
+                <div className="results">
+                  {selectedCompetitors.length > 0 && (
+                    <>
+                      <div className="results-header">
+                        <h2>Results based on stages {getCommonStages(scores.filter(c => selectedCompetitors.includes(c.competitorKey))).join(', ')}</h2>
+                      </div>
+                      <ul>
+                        {comparison
+                          .filter(competitor => selectedCompetitors.includes(competitor.competitorKey))
+                          .map((competitor, index) => {
+                            const highestScore = comparison[0].totalScore;
+                            return renderCompetitorListItem(competitor, index, highestScore);
+                          })}
+                      </ul>
+                      <div className="clear-button-container">
+                        <button
+                          className="clear-button"
+                          onClick={clearAllCompetitors}
+                          title="Clear all competitors from comparison"
+                        >
+                          Clear Selected
+                        </button>
+                      </div>
+                      <div className="section-divider"></div>
+                      <ul>
+                        {comparison.map((competitor, index) => {
+                          const highestScore = comparison[0].totalScore;
+                          return renderCompetitorListItem(competitor, index, highestScore);
+                        })}
+                      </ul>
+                    </>
+                  )}
+                  <h2>All Competitor Scores</h2>
+                  <ul>
+                    {scores.map((competitor, index) => {
+                      const highestScore = scores[0].totalScore;
+                      return renderCompetitorListItem(competitor, index, highestScore);
+                    })}
+                  </ul>
+                </div>
+              )}
+              {activeView === 'stages' && (
         <div className="results">
-          {selectedCompetitors.length > 0 && (
-            <>
-              <div className="results-header">
-                <h2>Results based on stages {getCommonStages(scores.filter(c => selectedCompetitors.includes(c.competitorKey))).join(', ')}</h2>
-              </div>
-              <ul>
-                {comparison
-                  .filter(competitor => selectedCompetitors.includes(competitor.competitorKey))
-                  .map((competitor, index) => {
-                    const highestScore = comparison[0].totalScore;
-                    return renderCompetitorListItem(competitor, index, highestScore);
-                  })}
-              </ul>
-              <div className="clear-button-container">
-                <button 
-                  className="clear-button"
-                  onClick={clearAllCompetitors}
-                  title="Clear all competitors from comparison"
-                >
-                  Clear Selected
-                </button>
-              </div>
-              <div className="section-divider"></div>
-              <ul>
-                {comparison.map((competitor, index) => {
-                  const highestScore = comparison[0].totalScore;
-                  return renderCompetitorListItem(competitor, index, highestScore);
-                })}
-              </ul>
-            </>
-          )}
-          <h2>All Competitor Scores</h2>
-          <ul>
-            {scores.map((competitor, index) => {
-              const highestScore = scores[0].totalScore;
-              return renderCompetitorListItem(competitor, index, highestScore);
-            })}
-          </ul>
-        </div>
-      )}
-      {scores.length > 0 && (
-        <div className="results" style={{ marginTop: '1rem' }}>
           <h2>Stage Results</h2>
           {allStageNumbers.map(stageNum => {
             const entries = scores
@@ -913,32 +987,33 @@ function App() {
                       return (
                         <li key={e.key} className={isCompetitorOpen ? 'expanded' : ''}>
                           <div className="competitor-row" onClick={() => toggleStageCompetitor(stageNum, e.key)} style={{ cursor: 'pointer' }}>
-                            <span className="competitor-name">
-                              <FontAwesomeIcon icon={faChevronDown} className={`chevron ${isCompetitorOpen ? 'open' : ''}`} />
-                              {idx + 1}. {e.name} ({e.division})
+                            <span className="row-left">
+                              <span className="rank">#{idx + 1}</span>
+                              <span className="competitor-name">
+                                {e.name} <span className="row-division">({e.division})</span>
+                              </span>
                             </span>
                             <div className="competitor-actions">
-                              <span className="hit-factor">HF {e.hitFactor.toFixed(4)}</span>
-                              <span className="stage-percent">{highestStageScore > 0 ? `${calculatePercentage(e.score, highestStageScore)}%` : '0.0%'}</span>
+                              <span className="metric">
+                                {highestStageScore > 0 ? `${calculatePercentage(e.score, highestStageScore)}%` : '0.0%'} <span className="metric-sub">HF {e.hitFactor.toFixed(4)}</span>
+                              </span>
                             </div>
                           </div>
                           {isCompetitorOpen && (
                             <div className="stage">
-                              <div className="stage-details">
-                                <div className="stage-time">Time: {e.time.toFixed(2)}s</div>
-                                <div className="stage-content">
-                                  <div className="hits-container">
-                                    {Object.entries(e.hits || { A: 0, C: 0, D: 0, M: 0, NS: 0 }).map(([type, count]) => (
-                                      <div key={type} className="hit">
-                                        <span className="hit-type">{type}:</span>
-                                        <span className="hit-count">{count as number}</span>
-                                      </div>
-                                    ))}
-                                    <div className="hit">
-                                      <span className="hit-type">Proc:</span>
-                                      <span className="hit-count">{e.procedures}</span>
-                                    </div>
+                              <div className="stage-metrics">
+                                <span><b>{e.time.toFixed(2)}</b>s</span>
+                              </div>
+                              <div className="hits-container">
+                                {Object.entries(e.hits || { A: 0, C: 0, D: 0, M: 0, NS: 0 }).map(([type, count]) => (
+                                  <div key={type} className={hitChipClass(type, count as number)}>
+                                    <span className="hit-type">{type}</span>
+                                    <span className="hit-count">{count as number}</span>
                                   </div>
+                                ))}
+                                <div className={hitChipClass('Proc', e.procedures)}>
+                                  <span className="hit-type">Proc</span>
+                                  <span className="hit-count">{e.procedures}</span>
                                 </div>
                               </div>
                             </div>
@@ -952,21 +1027,31 @@ function App() {
             );
           })}
         </div>
-      )}
-      {projectedStandings.length > 0 && (
-        <div className="results projected-standings" style={{ marginTop: '1rem' }}>
-          <h2>Projected standings</h2>
-          <p className="rivals-confidence-legend">
-            Field re-ranked by average stage % (projected finish).
-            Dot shows reliability given stages shot so far —
-            <span className="rival-confidence-dot rival-confidence-high" /> solid,
-            <span className="rival-confidence-dot rival-confidence-medium" /> fair,
-            <span className="rival-confidence-dot rival-confidence-low" /> thin.
-          </p>
-          <ul>
-            {projectedStandings.map(entry => renderProjectedListItem(entry))}
-          </ul>
-        </div>
+              )}
+              {activeView === 'projected' && (
+                projectedStandings.length > 0 ? (
+                  <div className="results projected-standings">
+                    <h2>Projected standings</h2>
+                    <p className="rivals-confidence-legend">
+                      Field re-ranked by average stage % (projected finish).
+                      Dot shows reliability given stages shot so far —
+                      <span className="rival-confidence-dot rival-confidence-high" /> solid,
+                      <span className="rival-confidence-dot rival-confidence-medium" /> fair,
+                      <span className="rival-confidence-dot rival-confidence-low" /> thin.
+                    </p>
+                    <ul>
+                      {projectedStandings.map(entry => renderProjectedListItem(entry))}
+                    </ul>
+                  </div>
+                ) : (
+                  <div className="results">
+                    <p className="loading">Not enough data to project standings yet.</p>
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+        </>
       )}
       {showOverlayFeature && overlayModalCompetitor && overlayStartStage !== null && (
         <OverlaySettingsModal
