@@ -12,6 +12,7 @@ import {
   StandingRow,
 } from './StageOverlay';
 import OverlaySettingsModal from './OverlaySettingsModal';
+import HotMatches, { HotMatch } from './HotMatches';
 
 interface Division {
   value: string;
@@ -132,6 +133,7 @@ function App() {
   const [selectedCategory, setSelectedCategory] = useState<string>(() => initialParams.get('category') || 'Overall');
   const [appliedCategory, setAppliedCategory] = useState<string>(() => initialParams.get('category') || 'Overall');
   const [competitionName, setCompetitionName] = useState<string>('');
+  const [hotMatches, setHotMatches] = useState<HotMatch[]>([]);
   const [overlayModalCompetitor, setOverlayModalCompetitor] = useState<CompetitorWithTotalScore | null>(null);
   const [overlayStartStage, setOverlayStartStage] = useState<number | null>(null);
   const [showOverlayFeature, setShowOverlayFeature] = useState(() => initialParams.get('overlay') === '1');
@@ -479,6 +481,34 @@ function App() {
     setShouldFetch(true);
   };
 
+  // On the landing screen (no match selected), fetch the "live now" matches so
+  // the user can tap one instead of pasting a URL.
+  const isLanding = !matchId || !typeId;
+  useEffect(() => {
+    if (!isLanding) return;
+    let cancelled = false;
+    const baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : '/api';
+    fetch(`${baseUrl}/hot-matches`)
+      .then(res => (res.ok ? res.json() : Promise.reject(new Error('failed'))))
+      .then(data => {
+        if (!cancelled) setHotMatches(Array.isArray(data?.matches) ? data.matches : []);
+      })
+      .catch(() => {
+        if (!cancelled) setHotMatches([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isLanding]);
+
+  const handleHotMatchSelect = (match: HotMatch) => {
+    setTypeId(match.matchType);
+    setMatchId(match.matchId);
+    setDivision(match.topDivision || 'all');
+    setSsiUrl(`https://shootnscoreit.com/event/${match.matchType}/${match.matchId}/live-scores/`);
+    setShouldFetch(true);
+  };
+
   const renderStageScores = (competitor: CompetitorWithTotalScore, index: number) => {
     if (expandedCompetitor !== competitor.competitorKey) return null;
     
@@ -810,6 +840,7 @@ function App() {
     <div className="App">
       <h1>Live Scores</h1>
       <div className="tab-panel">
+        {isLanding && <HotMatches matches={hotMatches} onSelect={handleHotMatchSelect} />}
         <form onSubmit={handleSubmit}>
           <div>
           <input
