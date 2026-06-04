@@ -17,6 +17,18 @@ const mkComp = (key: string, hitFactor: number): Competitor => ({
     hits: { A: 20, C: 0, D: 0, M: 0, NS: 0 }, // maxPossibleScore = (A+C+D+M)*5 = 100
     competitorKey: key,
 });
+// Variant with an explicit round count so stages get different point weights
+// (maxPossibleScore = rounds * 5).
+const mkCompR = (key: string, hitFactor: number, rounds: number): Competitor => ({
+    name: key,
+    division: 'Production Optics',
+    powerFactor: 'Minor',
+    hitFactor,
+    time: 10,
+    points: rounds * 5,
+    hits: { A: rounds, C: 0, D: 0, M: 0, NS: 0 },
+    competitorKey: key,
+});
 const mkStage = (stage: number, comps: Competitor[]): Stage => ({ stage, competitors: comps, procedures: 0 });
 const buildScores = (raw: Stage[]) => calculateCompetitorScores(calculateMaxPossibleScores(raw));
 
@@ -265,5 +277,102 @@ describe('computeProjectedStandings', () => {
         const standings = computeProjectedStandings(buildScores(raw), raw);
         expect(standings.find(e => e.competitor.competitorKey === 'few')!.confidence).toBe('low');
         expect(standings.find(e => e.competitor.competitorKey === 'full')!.confidence).toBe('high');
+    });
+});
+
+describe('points-weighted average', () => {
+    test('avg is the points-weighted mean of stage %s', () => {
+        // X: 100% on a 60-pt stage (12 rounds), 70% on a 160-pt stage (32 rounds).
+        const raw = [
+            mkStage(1, [mkCompR('X', 10, 12)]),                       // X alone => 100%, weight 60
+            mkStage(2, [mkCompR('X', 7, 32), mkCompR('Y', 10, 32)]),  // X = 7/10 = 70%, weight 160
+        ];
+        const r = getCompetitorAvgPct('X', raw)!;
+        expect(r.weights).toEqual([60, 160]);
+        expect(r.avg).toBeCloseTo((100 * 60 + 70 * 160) / (60 + 160), 5); // 78.18, not the flat 85
+    });
+
+    test('does NOT penalize shooting small stages — equal % gives equal avg & rank', () => {
+        // 'top' leads every stage (100%). S shoots 6 small stages @85%, B shoots 6 big @85%.
+        const raw: Stage[] = [];
+        for (let s = 1; s <= 6; s++) raw.push(mkStage(s, [mkCompR('top', 10, 12), mkCompR('S', 8.5, 12)]));
+        for (let s = 7; s <= 12; s++) raw.push(mkStage(s, [mkCompR('top', 10, 32), mkCompR('B', 8.5, 32)]));
+        const avgS = getCompetitorAvgPct('S', raw)!.avg;
+        const avgB = getCompetitorAvgPct('B', raw)!.avg;
+        expect(avgS).toBeCloseTo(85, 5);
+        expect(avgB).toBeCloseTo(85, 5);
+        const standings = computeProjectedStandings(buildScores(raw), raw);
+        const posS = standings.find(e => e.competitor.competitorKey === 'S')!.projectedPosition;
+        const posB = standings.find(e => e.competitor.competitorKey === 'B')!.projectedPosition;
+        expect(posS).toBe(posB); // tie — small-stage shooter is not pushed down
+    });
+
+    test('ranking favours strength on the bigger (higher-point) stages', () => {
+        // P strong on the big stage, Q strong on the small one; identical flat means.
+        const raw = [
+            mkStage(1, [mkCompR('top', 10, 12), mkCompR('P', 7, 12), mkCompR('Q', 10, 12)]), // small: P 70%, Q 100%
+            mkStage(2, [mkCompR('top', 10, 32), mkCompR('P', 10, 32), mkCompR('Q', 7, 32)]), // big:   P 100%, Q 70%
+        ];
+        const standings = computeProjectedStandings(buildScores(raw), raw);
+        const pos = (k: string) => standings.find(e => e.competitor.competitorKey === k)!.projectedPosition;
+        expect(pos('P')).toBeLessThan(pos('Q'));
+    });
+
+    test('confidence keys off completed POINTS, not stage count', () => {
+        // 6 small (60) + 6 big (160) stages; 'top' on all. smallA does 3 small, bigB does 3 big.
+        const raw: Stage[] = [];
+        for (let s = 1; s <= 6; s++) {
+            const comps = [mkCompR('top', 10, 12)];
+            if (s <= 3) comps.push(mkCompR('smallA', 8, 12));
+            raw.push(mkStage(s, comps));
+        }
+        for (let s = 7; s <= 12; s++) {
+            const comps = [mkCompR('top', 10, 32)];
+            if (s <= 9) comps.push(mkCompR('bigB', 8, 32));
+            comps.push(mkCompR('fullC', 8, 32)); // fullC shoots all 6 big stages
+            raw.push(mkStage(s, comps));
+        }
+        const standings = computeProjectedStandings(buildScores(raw), raw);
+        const conf = (k: string) => standings.find(e => e.competitor.competitorKey === k)!.confidence;
+        // smallA & bigB both shot 3 stages, but bigB covers far more of the match's points.
+        expect(conf('smallA')).toBe('low');
+        expect(conf('bigB')).toBe('medium');
+        expect(conf('fullC')).toBe('high');
+    });
+
+    test('range widens as less of the match (by points) is completed', () => {
+        // R shoots 2 stages with spread (70%, 90%), weights equal.
+        const twoStages = [
+            mkStage(1, [mkCompR('lead', 10, 20), mkCompR('R', 7, 20)]), // R 70%
+            mkStage(2, [mkCompR('lead', 10, 20), mkCompR('R', 9, 20)]), // R 90%
+        ];
+        const seWhole = computeProjectedFinish('R', buildScores(twoStages), twoStages)!.stdErr;
+
+        // Same two stages, but the match has 10 more stages R hasn't shot (someone else has).
+        const bigMatch = [...twoStages.map(s => ({ ...s, competitors: [...s.competitors] }))];
+        for (let s = 3; s <= 12; s++) bigMatch.push(mkStage(s, [mkCompR('other', 8, 20)]));
+        const sefPartial = computeProjectedFinish('R', buildScores(bigMatch), bigMatch)!.stdErr;
+
+        expect(seWhole).toBeGreaterThan(0);
+        expect(sefPartial).toBeGreaterThan(seWhole); // unseen points widen the band
+    });
+
+    test('projected order converges to official total order when everyone is complete', () => {
+        // 3 stages of different sizes; all three competitors shoot all of them.
+        const raw = [
+            mkStage(1, [mkCompR('top', 10, 12), mkCompR('mid', 8, 12), mkCompR('low', 5, 12)]),
+            mkStage(2, [mkCompR('top', 10, 20), mkCompR('mid', 7, 20), mkCompR('low', 5, 20)]),
+            mkStage(3, [mkCompR('top', 10, 32), mkCompR('mid', 9, 32), mkCompR('low', 5, 32)]),
+        ];
+        const scores = buildScores(raw);
+        const standings = computeProjectedStandings(scores, raw);
+        // Same order as the official total-score standings.
+        expect(standings.map(e => e.competitor.competitorKey)).toEqual(scores.map(c => c.competitorKey));
+        // And projected % of winner matches total / winner-total.
+        const winnerTotal = scores[0].totalScore;
+        standings.forEach(e => {
+            const total = scores.find(c => c.competitorKey === e.competitor.competitorKey)!.totalScore;
+            expect(e.projectedPctOfWinner).toBeCloseTo((total / winnerTotal) * 100, 4);
+        });
     });
 });
