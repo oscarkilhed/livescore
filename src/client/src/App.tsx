@@ -5,6 +5,13 @@ import './App.css';
 import { CompetitorWithTotalScore, Stage } from './types';
 import { calculateCompetitorScores, calculateMaxPossibleScores, compareCompetitors } from './calculator';
 import Select, { MultiValue } from 'react-select';
+import {
+  downloadAllOverlaysAsZip,
+  StageOverlayEntry,
+  Movement,
+  StandingRow,
+} from './StageOverlay';
+import OverlaySettingsModal from './OverlaySettingsModal';
 
 interface Division {
   value: string;
@@ -65,6 +72,8 @@ function App() {
   const [selectedCategory, setSelectedCategory] = useState<string>('Overall');
   const [appliedCategory, setAppliedCategory] = useState<string>('Overall');
   const [competitionName, setCompetitionName] = useState<string>('');
+  const [overlayModalCompetitor, setOverlayModalCompetitor] = useState<CompetitorWithTotalScore | null>(null);
+  const [overlayStartStage, setOverlayStartStage] = useState<number | null>(null);
 
   // Load initial values from URL parameters
   useEffect(() => {
@@ -154,28 +163,145 @@ function App() {
    * Get the placement (rank) of a competitor on a specific stage
    * Returns the 1-based position and the percentage of max score
    */
-  const getStageStats = (competitorKey: string, stageNumber: number): { placement: number; totalOnStage: number; stagePercent: string } => {
-    // Get all scores for this stage from all competitors
-    const stageScoresForAll = scores
-      .map(c => {
-        const stageScore = c.stageScores.find(s => s.stage === stageNumber);
-        return stageScore ? { key: c.competitorKey, score: stageScore.score, maxScore: stageScore.maxPossibleScore } : null;
-      })
-      .filter((s): s is { key: string; score: number; maxScore: number } => s !== null);
-    
-    // Sort by score descending to get placements
-    const sorted = [...stageScoresForAll].sort((a, b) => b.score - a.score);
-    const placement = sorted.findIndex(s => s.key === competitorKey) + 1;
-    
-    // Calculate stage percentage
-    const myScore = stageScoresForAll.find(s => s.key === competitorKey);
-    const maxScoreOnStage = sorted.length > 0 ? sorted[0].score : 0;
-    const stagePercent = myScore && maxScoreOnStage > 0 
-      ? ((myScore.score / maxScoreOnStage) * 100).toFixed(1) 
-      : '0.0';
-    
-    return { placement, totalOnStage: sorted.length, stagePercent };
-  };
+  const getStageStats = useCallback(
+    (competitorKey: string, stageNumber: number): { placement: number; totalOnStage: number; stagePercent: string } => {
+      const stageScoresForAll = scores
+        .map(c => {
+          const stageScore = c.stageScores.find(s => s.stage === stageNumber);
+          return stageScore ? { key: c.competitorKey, score: stageScore.score, maxScore: stageScore.maxPossibleScore } : null;
+        })
+        .filter((s): s is { key: string; score: number; maxScore: number } => s !== null);
+
+      const sorted = [...stageScoresForAll].sort((a, b) => b.score - a.score);
+      const placement = sorted.findIndex(s => s.key === competitorKey) + 1;
+
+      const myScore = stageScoresForAll.find(s => s.key === competitorKey);
+      const maxScoreOnStage = sorted.length > 0 ? sorted[0].score : 0;
+      const stagePercent = myScore && maxScoreOnStage > 0
+        ? ((myScore.score / maxScoreOnStage) * 100).toFixed(1)
+        : '0.0';
+
+      return { placement, totalOnStage: sorted.length, stagePercent };
+    },
+    [scores],
+  );
+
+  /**
+   * Returns the full ranked list of competitors for an explicit set of stage
+   * numbers (order of the array does not matter for scoring, only membership).
+   */
+  const getVirtualRankings = useCallback(
+    (stageNumbers: number[]): CompetitorWithTotalScore[] => {
+      const set = new Set(stageNumbers);
+      const relevantStages = stages.filter(s => set.has(s.stage) && !excludedStages.includes(s.stage));
+      const categoryParam = appliedCategory === 'Overall' ? undefined : appliedCategory;
+      return calculateCompetitorScores(relevantStages, categoryParam);
+    },
+    [stages, excludedStages, appliedCategory],
+  );
+
+  /**
+   * Builds the shooting order starting from `startStage` and wrapping around.
+   * E.g. stages [1,2,3,4,5,6], startStage=3 → [3,4,5,6,1,2].
+   */
+  const buildRotatedSequence = useCallback(
+    (stageNumbers: number[], startStage: number): number[] => {
+      const sorted = [...stageNumbers].sort((a, b) => a - b);
+      const idx = sorted.indexOf(startStage);
+      if (idx === -1) return sorted;
+      return [...sorted.slice(idx), ...sorted.slice(0, idx)];
+    },
+    [],
+  );
+
+  const openOverlayModal = useCallback((competitor: CompetitorWithTotalScore) => {
+    const earliest = competitor.stageScores.length > 0
+      ? Math.min(...competitor.stageScores.map(s => s.stage))
+      : 1;
+    setOverlayStartStage(earliest);
+    setOverlayModalCompetitor(competitor);
+  }, []);
+
+  const closeOverlayModal = useCallback(() => {
+    setOverlayModalCompetitor(null);
+    setOverlayStartStage(null);
+  }, []);
+
+  const handleDownloadAllOverlays = useCallback(
+    async (competitor: CompetitorWithTotalScore, startStage: number) => {
+      // Build the rotated shooting order: [startStage, …, last, 1, …, startStage-1]
+      const allStageNums = competitor.stageScores.map(s => s.stage);
+      const rotatedSequence = buildRotatedSequence(allStageNums, startStage);
+
+      const padWidth = String(rotatedSequence.length).length;
+      const entries: StageOverlayEntry[] = rotatedSequence.map((stageNum, seqIdx) => {
+        const stageScore = competitor.stageScores.find(s => s.stage === stageNum)!;
+        const stageName = stageScore.stageName || `Stage ${stageNum}`;
+
+        // Stage result params
+        const stageStats = getStageStats(competitor.competitorKey, stageNum);
+        const stageResultParams = {
+          stageName,
+          hitFactor: stageScore.hitFactor,
+          time: stageScore.time,
+          stageScore: stageScore.score,
+          maxPossibleScore: stageScore.maxPossibleScore,
+          hits: stageScore.hits,
+          procedures: stageScore.procedures,
+          stagePercent: stageStats.stagePercent,
+        };
+
+        // Cumulative standings use all stages up to position seqIdx in the rotated order
+        const stagesUpToNow = rotatedSequence.slice(0, seqIdx + 1);
+        const rankingsNow = getVirtualRankings(stagesUpToNow);
+        const posNow = rankingsNow.findIndex(c => c.competitorKey === competitor.competitorKey) + 1;
+        const topScore = rankingsNow.length > 0 ? rankingsNow[0].totalScore : 0;
+        const total = rankingsNow.length;
+
+        // Movement: compare with standings after the previous stage in the rotated order
+        let movement: Movement = 'none';
+        if (seqIdx > 0) {
+          const rankingsPrev = getVirtualRankings(rotatedSequence.slice(0, seqIdx));
+          const posPrev = rankingsPrev.findIndex(c => c.competitorKey === competitor.competitorKey) + 1;
+          if (posNow < posPrev) movement = 'up';
+          else if (posNow > posPrev) movement = 'down';
+        }
+
+        const windowSize = 5;
+        let windowStart = Math.max(0, posNow - 1 - Math.floor(windowSize / 2));
+        if (windowStart + windowSize > total) windowStart = Math.max(0, total - windowSize);
+        const rows: StandingRow[] = rankingsNow.slice(windowStart, windowStart + windowSize).map((c, idx) => ({
+          rank: windowStart + idx + 1,
+          name: c.name,
+          scorePercent: topScore > 0 ? (c.totalScore / topScore) * 100 : 0,
+          isShooter: c.competitorKey === competitor.competitorKey,
+        }));
+
+        const standingsParams = {
+          stageName,
+          stageNumber: stageNum,
+          rows,
+          movement,
+          shooterTotalScore: rankingsNow.find(c => c.competitorKey === competitor.competitorKey)?.totalScore ?? 0,
+          totalCompetitors: total,
+        };
+
+        const seqNum = String(seqIdx + 1).padStart(padWidth, '0');
+        const filePrefix = `${seqNum}-${stageName.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+
+        return { stageResultParams, standingsParams, filePrefix };
+      });
+
+      await downloadAllOverlaysAsZip(competitor.name, entries);
+    },
+    [buildRotatedSequence, getStageStats, getVirtualRankings],
+  );
+
+  const handleModalDownload = useCallback(async () => {
+    if (!overlayModalCompetitor || overlayStartStage === null) return;
+    await handleDownloadAllOverlays(overlayModalCompetitor, overlayStartStage);
+    closeOverlayModal();
+  }, [overlayModalCompetitor, overlayStartStage, handleDownloadAllOverlays, closeOverlayModal]);
 
   const handleUrlPaste = (url: string) => {
     try {
@@ -213,7 +339,7 @@ function App() {
     setLoading(true);
     setError(null);
     try {
-      const baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3001' : '/api';
+      const baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : '/api';
       const response = await fetch(`${baseUrl}/${typeId}/${matchId}/${division}/parse`);
       
       if (!response.ok) {
@@ -316,6 +442,13 @@ function App() {
       <div className="stage-scores">
         <div className="sticky-competitor-name">
           <h3>{index + 1}. {competitor.name} {competitor.category && competitor.category !== '-' && `(${getCategoryDisplayName(competitor.category)}) `}{competitor.division}</h3>
+          <button
+            className="overlay-btn download-all-btn"
+            onClick={() => openOverlayModal(competitor)}
+            title="Configure and download all stage overlay images as a ZIP file"
+          >
+            Download all overlays (.zip)
+          </button>
         </div>
         <div className="total-hits">
           <div className="hits-container">
@@ -687,6 +820,18 @@ function App() {
             );
           })}
         </div>
+      )}
+      {overlayModalCompetitor && overlayStartStage !== null && (
+        <OverlaySettingsModal
+          competitor={overlayModalCompetitor}
+          startStage={overlayStartStage}
+          availableStages={overlayModalCompetitor.stageScores
+            .map(s => ({ value: s.stage, label: s.stageName || `Stage ${s.stage}` }))
+            .sort((a, b) => a.value - b.value)}
+          onStartStageChange={setOverlayStartStage}
+          onDownload={handleModalDownload}
+          onClose={closeOverlayModal}
+        />
       )}
     </div>
   );

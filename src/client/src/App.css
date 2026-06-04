@@ -388,6 +388,9 @@ button:disabled {
   padding: 4px 12px;
   border-bottom: 1px solid #eee;
   font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .sticky-competitor-name h3 {
@@ -490,4 +493,122 @@ button:disabled {
 
 .chevron.open {
   transform: rotate(180deg);
+}
+
+/* Overlay image generation buttons */
+
+.overlay-btn {
+  background: none;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  color: #6c757d;
+  cursor: pointer;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  padding: 2px 8px;
+  text-transform: uppercase;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.overlay-btn:hover {
+  background: #fff3cd;
+  border-color: #e0a800;
+  color: #856404;
+}
+
+.download-all-btn {
+  font-size: 0.75rem;
+  padding: 3px 10px;
+  margin-left: auto;
+}
+
+/* ── Overlay settings modal ─────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-box {
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);
+  padding: 2rem 2.25rem;
+  width: min(480px, 92vw);
+}
+
+.modal-box h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.2rem;
+}
+
+.modal-competitor-name {
+  margin: 0 0 1.5rem;
+  color: #6c757d;
+  font-size: 0.9rem;
+}
+
+.modal-field {
+  margin-bottom: 1.5rem;
+}
+
+.modal-field label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+  font-size: 0.9rem;
+}
+
+.modal-field-hint {
+  margin: 0 0 0.5rem;
+  color: #6c757d;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.modal-field select {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #ced4da;
+  border-radius: 5px;
+  font-size: 0.95rem;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 1.75rem;
+}
+
+.modal-btn {
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0.45rem 1.1rem;
+  transition: background 0.15s;
+}
+
+.modal-btn-primary {
+  background: #212529;
+  color: #fff;
+}
+
+.modal-btn-primary:hover {
+  background: #f0c040;
+  color: #212529;
+}
+
+.modal-btn-secondary {
+  background: #e9ecef;
+  color: #495057;
+}
+
+.modal-btn-secondary:hover {
+  background: #dee2e6;
 }
