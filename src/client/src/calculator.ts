@@ -84,11 +84,13 @@ function calculateStageScore(competitor: Competitor, maxHitFactor: number, maxPo
 /**
  * Internal function to calculate scores for all competitors across given stages.
  * 
- * Filters competitors by category if provided, then calculates stage scores
- * and total scores for each competitor.
+ * Scores are always computed relative to the division-wide max hit factor per stage,
+ * so a category winner's score reflects their standing within the full division.
+ * The category parameter only controls which competitors appear in the returned ranking.
  * 
  * @param stages - Array of Stage objects to process
- * @param category - Optional category filter (e.g., 'Overall', 'Senior', 'Lady')
+ * @param category - Optional category filter (e.g., 'Senior', 'Lady'). When set, only
+ *   competitors in that category are returned, but scoring still uses the full division.
  * @returns Array of CompetitorWithTotalScore sorted by total score (descending)
  */
 function calculateScoresForStages(stages: Stage[], category?: string): CompetitorWithTotalScore[] {
@@ -113,12 +115,10 @@ function calculateScoresForStages(stages: Stage[], category?: string): Competito
 
     stages.forEach(stage => {
         const maxPossibleScore = stage.maxPossibleScore || 0;
-        // Filter competitors by category before calculating maxHitFactor
-        // This ensures category-specific rankings (e.g., top Senior gets 100% in Senior category)
-        const categoryCompetitors = category 
-            ? stage.competitors.filter(c => c.category === category)
-            : stage.competitors;
-        const validHitFactors = categoryCompetitors
+        // maxHitFactor is always computed from the full division (all competitors),
+        // so scores are relative to the division leader, not just the category leader.
+        // Category only controls which competitors appear in the final ranking.
+        const validHitFactors = stage.competitors
             .map(c => c.hitFactor)
             .filter(hf => hf && hf > 0);
         const maxHitFactor = validHitFactors.length > 0 ? Math.max(...validHitFactors) : 0;

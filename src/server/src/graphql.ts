@@ -192,7 +192,7 @@ query GetLiveScoresIncremental($contentType: Int!, $eventId: String!, $updatedAf
  * Default SSI JWT auth mutation (username/password -> token + refresh token).
  * If SSI uses different field names, this can be adapted quickly.
  */
-const AUTH_TOKEN_MUTATION = `
+const AUTH_TOKEN_MUTATION_CAMEL = `
 mutation TokenAuth($username: String!, $password: String!) {
   tokenAuth(username: $username, password: $password) {
     token
@@ -201,14 +201,40 @@ mutation TokenAuth($username: String!, $password: String!) {
 }
 `;
 
+const AUTH_TOKEN_MUTATION_SNAKE = `
+mutation TokenAuth($email: String!, $password: String!) {
+  token_auth(email: $email, password: $password) {
+    token {
+      token
+    }
+    refresh_token {
+      token
+    }
+  }
+}
+`;
+
 /**
  * Default SSI JWT refresh mutation (refresh token -> new token).
  */
-const AUTH_REFRESH_MUTATION = `
+const AUTH_REFRESH_MUTATION_CAMEL = `
 mutation RefreshToken($refreshToken: String!) {
   refreshToken(refreshToken: $refreshToken) {
     token
     refreshToken
+  }
+}
+`;
+
+const AUTH_REFRESH_MUTATION_SNAKE = `
+mutation RefreshToken($refreshToken: String!, $revokeRefreshToken: Boolean!) {
+  refresh_token(refresh_token: $refreshToken, revoke_refresh_token: $revokeRefreshToken) {
+    token {
+      token
+    }
+    refresh_token {
+      token
+    }
   }
 }
 `;
@@ -470,7 +496,8 @@ async function executeQuery<T>(
   async function executeRawGraphQL(
     queryString: string,
     queryVariables: Record<string, unknown>,
-    authHeaderToken?: string
+    authHeaderToken?: string,
+    authScheme: 'Bearer' | 'JWT' = 'Bearer'
   ): Promise<GenericGraphQLResponse> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -479,7 +506,7 @@ async function executeQuery<T>(
     };
 
     if (authHeaderToken) {
-      headers.Authorization = `Bearer ${authHeaderToken}`;
+      headers.Authorization = `${authScheme} ${authHeaderToken}`;
     }
 
     if (config.graphqlSessionCookie) {
@@ -508,7 +535,7 @@ async function executeQuery<T>(
 
   function extractAuthPayload(
     json: GenericGraphQLResponse,
-    mutationField: 'tokenAuth' | 'refreshToken'
+    mutationField: 'tokenAuth' | 'token_auth' | 'refreshToken' | 'refresh_token'
   ): { token?: string; refreshToken?: string } | null {
     const data = json.data as Record<string, unknown> | undefined;
     if (!data) {
@@ -518,9 +545,24 @@ async function executeQuery<T>(
     if (!value) {
       return null;
     }
+    const rawToken =
+      typeof value.token === 'string'
+        ? value.token
+        : (value.token as Record<string, unknown> | undefined)?.token;
+    const rawRefreshTokenCamel =
+      typeof value.refreshToken === 'string'
+        ? value.refreshToken
+        : (value.refreshToken as Record<string, unknown> | undefined)?.token;
+    const rawRefreshTokenSnake =
+      typeof value.refresh_token === 'string'
+        ? value.refresh_token
+        : (value.refresh_token as Record<string, unknown> | undefined)?.token;
+
     return {
-      token: typeof value.token === 'string' ? value.token : undefined,
-      refreshToken: typeof value.refreshToken === 'string' ? value.refreshToken : undefined,
+      token: typeof rawToken === 'string' ? rawToken : undefined,
+      refreshToken:
+        (typeof rawRefreshTokenCamel === 'string' ? rawRefreshTokenCamel : undefined)
+        || (typeof rawRefreshTokenSnake === 'string' ? rawRefreshTokenSnake : undefined),
     };
   }
 
@@ -529,20 +571,35 @@ async function executeQuery<T>(
       return undefined;
     }
 
-    const json = await executeRawGraphQL(
-      AUTH_TOKEN_MUTATION,
-      {
-        username: config.graphqlAuthUsername,
-        password: config.graphqlAuthPassword,
-      }
-    );
+    const snakeVariables = {
+      email: config.graphqlAuthUsername,
+      password: config.graphqlAuthPassword,
+    };
 
-    if (json.errors?.length) {
-      const messages = json.errors.map((e) => e.message).join('; ');
+    const snakeJson = await executeRawGraphQL(AUTH_TOKEN_MUTATION_SNAKE, snakeVariables);
+    if (!snakeJson.errors?.length) {
+      const payload = extractAuthPayload(snakeJson, 'token_auth');
+      cacheAccessToken(payload?.token, payload?.refreshToken);
+      return jwtAuthState.accessToken;
+    }
+
+    const snakeOnlyFailure = snakeJson.errors.some((e) => e.message.includes("Cannot query field 'token_auth'"));
+    if (!snakeOnlyFailure) {
+      const messages = snakeJson.errors.map((e) => e.message).join('; ');
       throw new GraphQLError(`GraphQL auth failed: ${messages}`, 401);
     }
 
-    const payload = extractAuthPayload(json, 'tokenAuth');
+    const camelVariables = {
+      username: config.graphqlAuthUsername,
+      password: config.graphqlAuthPassword,
+    };
+    const camelJson = await executeRawGraphQL(AUTH_TOKEN_MUTATION_CAMEL, camelVariables);
+    if (camelJson.errors?.length) {
+      const messages = camelJson.errors.map((e) => e.message).join('; ');
+      throw new GraphQLError(`GraphQL auth failed: ${messages}`, 401);
+    }
+
+    const payload = extractAuthPayload(camelJson, 'tokenAuth');
     cacheAccessToken(payload?.token, payload?.refreshToken);
     return jwtAuthState.accessToken;
   }
@@ -552,16 +609,26 @@ async function executeQuery<T>(
       return undefined;
     }
 
-    const json = await executeRawGraphQL(
-      AUTH_REFRESH_MUTATION,
-      { refreshToken: jwtAuthState.refreshToken }
-    );
+    const variables = { refreshToken: jwtAuthState.refreshToken, revokeRefreshToken: false };
 
-    if (json.errors?.length) {
+    const snakeJson = await executeRawGraphQL(AUTH_REFRESH_MUTATION_SNAKE, variables);
+    if (!snakeJson.errors?.length) {
+      const payload = extractAuthPayload(snakeJson, 'refresh_token');
+      cacheAccessToken(payload?.token, payload?.refreshToken);
+      return jwtAuthState.accessToken;
+    }
+
+    const snakeOnlyFailure = snakeJson.errors.some((e) => e.message.includes("Cannot query field 'refresh_token'"));
+    if (!snakeOnlyFailure) {
       return undefined;
     }
 
-    const payload = extractAuthPayload(json, 'refreshToken');
+    const camelJson = await executeRawGraphQL(AUTH_REFRESH_MUTATION_CAMEL, variables);
+    if (camelJson.errors?.length) {
+      return undefined;
+    }
+
+    const payload = extractAuthPayload(camelJson, 'refreshToken');
     cacheAccessToken(payload?.token, payload?.refreshToken);
     return jwtAuthState.accessToken;
   }
@@ -595,8 +662,8 @@ async function executeQuery<T>(
     return loginWithJwtMutation();
   }
 
-  async function runMainQuery(authToken?: string): Promise<T> {
-    const json = await executeRawGraphQL(query, variables, authToken);
+  async function runMainQuery(authToken?: string, authScheme: 'Bearer' | 'JWT' = 'Bearer'): Promise<T> {
+    const json = await executeRawGraphQL(query, variables, authToken, authScheme);
 
     if (json.errors && json.errors.length > 0) {
       const errorMessages = json.errors.map((e) => e.message).join('; ');
@@ -612,17 +679,23 @@ async function executeQuery<T>(
 
   try {
     const token = await resolveBearerToken();
+    const primaryAuthScheme: 'Bearer' | 'JWT' = config.graphqlAuthToken ? 'Bearer' : 'JWT';
 
     try {
-      return await runMainQuery(token);
+      return await runMainQuery(token, primaryAuthScheme);
     } catch (error) {
       if (!(error instanceof GraphQLError) || !error.message.includes(AUTH_RETRY_MESSAGE)) {
         throw error;
       }
 
+      // Some SSI setups expect JWT prefix even for externally provided tokens.
+      if (config.graphqlAuthToken && primaryAuthScheme === 'Bearer') {
+        return await runMainQuery(token, 'JWT');
+      }
+
       // Token may have expired or been revoked; refresh/login and retry once.
       const refreshedToken = await resolveBearerToken(true);
-      return await runMainQuery(refreshedToken);
+      return await runMainQuery(refreshedToken, 'JWT');
     }
   } catch (error) {
     if (error instanceof GraphQLError) {
