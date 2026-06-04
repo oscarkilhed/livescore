@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "client-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["start"],
+      "cwd": "src/client",
+      "port": 3002
+    }
+  ]
+}

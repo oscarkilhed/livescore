@@ -43,3 +43,8 @@ coverage/
 /test-results/
 /playwright-report/
 /playwright/.cache/ 
+# Mock API - ignore fetched competition data (may contain real names)
+src/mock-api/data/*.json
+
+# Claude Code - personal/local settings (launch.json is shared)
+.claude/settings.local.json

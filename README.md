@@ -26,6 +26,7 @@ The application consists of:
 - **Server** (`src/server/`): Express.js backend API that:
   - Fetches data from ShootnScoreIt.com GraphQL API
   - Provides REST API endpoints with caching
+- **Mock API** (`src/mock-api/`): Local GraphQL server for development (see [Development with Mock API](#development-with-mock-api))
 - **Docker**: Containerized deployment with Docker Compose
 
 ## Prerequisites
@@ -142,6 +143,76 @@ The server can be configured using environment variables:
 - `RESPONSE_CACHE_TTL_MS`: Response cache TTL (default: 5000)
 - `NODE_ENV`: Node environment - `development`, `production`, or `test`
 
+## Development with Mock API
+
+The mock API server replaces the live ShootnScoreIt.com API during development. It serves a static snapshot of real competition data, filtered by a configurable **virtual time** — so you can start at the beginning of a competition (no results) and fast-forward through the day without needing a live API connection or valid credentials.
+
+### Setup
+
+**Step 1 — Fetch a competition snapshot** (requires SSI credentials in `src/server/.env`):
+
+```bash
+npm run mock-api:fetch 22 24850
+# Saves to src/mock-api/data/22-24850.json
+# Arguments: <contentType> <eventId> (from the ShootnScoreIt URL)
+```
+
+If you don't have API credentials, the mock server falls back to built-in synthetic data automatically — no setup needed.
+
+**Step 2 — Point the backend at the mock API** in `src/server/.env`:
+
+```env
+GRAPHQL_API_URL=http://localhost:3001/graphql/
+GRAPHQL_API_KEY=mock-key
+```
+
+**Step 3 — Start both servers:**
+
+```bash
+# Terminal 1
+npm run mock-api
+
+# Terminal 2
+cd src/server && npm run dev
+```
+
+### Controlling virtual time
+
+The mock API starts at the beginning of the competition — no scorecards are visible yet. Use the control endpoints to advance time:
+
+```bash
+# Check current state
+curl http://localhost:3001/mock/state
+
+# Advance by 30 minutes
+curl -X POST http://localhost:3001/mock/time \
+  -H "Content-Type: application/json" \
+  -d '{"contentType":22,"eventId":"24850","advanceMinutes":30}'
+
+# Jump to a specific time
+curl -X POST http://localhost:3001/mock/time \
+  -H "Content-Type: application/json" \
+  -d '{"contentType":22,"eventId":"24850","time":"2026-05-16T12:00:00Z"}'
+
+# Show all results immediately
+curl -X POST http://localhost:3001/mock/time \
+  -H "Content-Type: application/json" \
+  -d '{"contentType":22,"eventId":"24850","fastForward":true}'
+
+# Reset to competition start
+curl -X POST http://localhost:3001/mock/reset \
+  -H "Content-Type: application/json" \
+  -d '{"contentType":22,"eventId":"24850"}'
+```
+
+### Data files
+
+Fetched snapshots are stored in `src/mock-api/data/{contentType}-{eventId}.json` and are excluded from git (they may contain real competitor names). The mock server automatically uses the matching file when queried for that event, or falls back to synthetic sample data if no file exists.
+
+### Mock API port
+
+The mock API runs on port 3001 by default. Override with `MOCK_API_PORT=<port>`.
+
 ## Development
 
 ### Running Tests
@@ -181,6 +252,11 @@ livescore/
 │   │   │       └── livescore_all.json
 │   │   ├── public/                # Static assets
 │   │   └── package.json
+│   ├── mock-api/                  # Local mock GraphQL server (dev only)
+│   │   ├── index.ts               # Mock server (time-filtered competition data)
+│   │   ├── fetch-data.ts          # Script to snapshot real SSI data
+│   │   ├── tsconfig.json
+│   │   └── data/                  # Fetched snapshots (gitignored)
 │   └── server/                    # Express.js backend API
 │       ├── src/
 │       │   ├── index.ts           # Express server and API endpoints
