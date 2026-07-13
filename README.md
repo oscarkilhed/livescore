@@ -7,13 +7,19 @@ A web application for calculating and comparing IPSC (International Practical Sh
 - **Live Score Fetching**: Fetch and parse live scores from ShootnScoreIt.com via GraphQL API
 - **Score Calculation**: Calculate competitor scores across multiple stages with proper hit factor calculations
 - **Competitor Comparison**: Compare specific competitors across common stages
+- **Projected Finish & Standings**: Mid-match projection of where each competitor is heading, with a confidence indicator based on how much of the match is done and how consistent their scores are
+- **Closest Rivals**: Surface the competitors performing most similarly to a given shooter, even across stages they haven't both shot
+- **"Live now" Matches**: Landing page highlighting the matches currently being viewed most (unique viewers)
+- **Stage Overlay Images**: Export per-stage result and standings cards (PNG, or all stages as a ZIP) for streaming/social use
 - **Division Support**: Support for multiple IPSC divisions:
   - Open
   - Standard
   - Production
   - Revolver
   - Classic
+  - Pistol Caliber Carbine
   - Production Optics
+  - Optics
 - **Stage Exclusion**: Exclude specific stages from calculations
 - **Category Filtering**: Filter competitors by category (Overall, Senior, etc.)
 - **URL Sharing**: Shareable URLs with query parameters for easy score sharing
@@ -141,6 +147,8 @@ The app supports URL parameters for easy sharing:
 - `division`: Division code (e.g., `hg18` for Production Optics)
 - `competitors`: Comma-separated list of competitor keys
 - `exclude`: Comma-separated list of stage numbers to exclude
+- `category`: Category filter (e.g., `S` for Senior; default `Overall`)
+- `view`: Active result tab — `standings`, `stages`, or `projected`
 
 Example:
 ```
@@ -151,14 +159,28 @@ http://localhost:3002/?matchId=21833&typeId=22&division=hg18&competitors=Competi
 
 ### GET `/:matchType/:matchId/:division/parse`
 
-Fetches and parses live scores from ShootnScoreIt.com
+Fetches and parses live scores from ShootnScoreIt.com.
 
 **Parameters:**
 - `matchType`: Event type ID
 - `matchId`: Match ID
-- `division`: Division code
+- `division`: Division code (or `all`)
 
-**Response:** JSON object with eventName and stages array
+**Response:** JSON object with `eventName` and a `stages` array. Returns `403` with code `RESULTS_RESTRICTED` when the organizer has limited results to organizers only, and `504` when the SSI API times out.
+
+### GET `/hot-matches`
+
+Returns the matches currently being viewed most (unique viewers, sliding window). Optional `?limit=` (1–50, default 12).
+
+**Response:** `{ matches: [...] }`
+
+### GET `/health`
+
+Health check for monitoring/load balancers; includes cache stats.
+
+### DELETE `/api/cache/:matchType/:matchId` and DELETE `/api/cache`
+
+Clear the GraphQL cache for a specific event, or all events.
 
 ## Configuration
 
@@ -175,6 +197,9 @@ The server can be configured using environment variables:
 - `GRAPHQL_CACHE_MAX_AGE_MS`: Max age for GraphQL cache before a full re-fetch (default: 259200000 = 3 days)
 - `GRAPHQL_CACHE_IDLE_EVICTION_MS`: Evict an event after this long with no requests (default: 21600000 = 6 hours)
 - `RESPONSE_CACHE_TTL_MS`: Response (burst) cache TTL in ms (default: 30000 = 30 seconds)
+- `RATE_LIMIT_ENABLED`: Enable per-IP rate limiting; set to `false` to disable (default: enabled)
+- `RATE_LIMIT_WINDOW_MS`: Rate-limit window in ms (default: 900000 = 15 minutes)
+- `RATE_LIMIT_MAX`: Max requests per IP per window (default: 100)
 - `NODE_ENV`: Node environment - `development`, `production`, or `test`
 
 ## Development with Mock API
@@ -277,11 +302,16 @@ livescore/
 │   │   ├── src/
 │   │   │   ├── App.tsx            # Main application component
 │   │   │   ├── App.css            # Application styles
-│   │   │   ├── calculator.ts      # Score calculation logic
+│   │   │   ├── calculator.ts      # Score, projection & rivals logic
+│   │   │   ├── stageLabel.ts      # Shared stage-label formatter
+│   │   │   ├── HotMatches.tsx     # "Live now" landing list
+│   │   │   ├── StageOverlay.ts    # Canvas overlay image generation
+│   │   │   ├── OverlaySettingsModal.tsx # Overlay export settings dialog
 │   │   │   ├── types.ts           # TypeScript type definitions
 │   │   │   ├── index.tsx          # React entry point
 │   │   │   └── __tests__/        # Client-side tests
 │   │   │       ├── calculator.test.ts
+│   │   │       ├── stageLabel.test.ts
 │   │   │       ├── livescore.json
 │   │   │       └── livescore_all.json
 │   │   ├── public/                # Static assets
@@ -293,8 +323,9 @@ livescore/
 │   │   └── data/                  # Fetched snapshots (gitignored)
 │   └── server/                    # Express.js backend API
 │       ├── src/
-│       │   ├── index.ts           # Express server and API endpoints
-│       │   ├── graphql.ts         # GraphQL API client
+│       │   ├── index.ts           # Express server, API endpoints & response cache
+│       │   ├── graphql.ts         # GraphQL API client, cache & single-flight
+│       │   ├── hotMatches.ts      # Unique-viewer "Live now" tracking
 │       │   ├── config.ts          # Server configuration management
 │       │   ├── errors.ts          # Error handling classes
 │       │   ├── types.ts           # TypeScript type definitions
