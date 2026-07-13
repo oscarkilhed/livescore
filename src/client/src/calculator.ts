@@ -327,6 +327,48 @@ export function computeConfidence(minStages: number, sharedStages: number, total
 }
 
 /**
+ * Weighted standard error of a competitor's mean stage %, in percentage points.
+ * Blends their points-weighted stage-to-stage spread (`sw`) with how much of the
+ * match they have completed (`f`): at `f=1` it is the standard error of the mean
+ * over the effective (Kish) sample size; as `f→0` it approaches their full
+ * spread, reflecting the unseen remainder of the match. Returns 0 with fewer
+ * than two stages (no spread to speak of), which callers treat as
+ * "no consistency signal yet".
+ */
+function computeStdErr(pcts: number[], weights: number[], avg: number, f: number): number {
+    const sumW = weights.reduce((a, b) => a + b, 0);
+    if (pcts.length < 2 || sumW <= 0) return 0;
+    const weightedVar = pcts.reduce((s, p, i) => s + weights[i] * (p - avg) ** 2, 0) / sumW;
+    const sw = Math.sqrt(weightedVar);
+    const nEff = sumW ** 2 / weights.reduce((s, w) => s + w * w, 0); // Kish effective N
+    return sw * Math.sqrt((f * f) / Math.max(nEff, 1) + (1 - f) ** 2);
+}
+
+/**
+ * Confidence for a *projection* dot. Unlike {@link computeConfidence} (rivals,
+ * which cares about stage count + overlap), a projection is only as trustworthy
+ * as (a) how much of the match is done and (b) how steady the competitor's
+ * stage-to-stage scores are: a metronome mid-match is more predictable than a
+ * streaky shooter at the same completion, and the dot should say so. This makes
+ * the dot and the projected range tell the same story, since both are driven by
+ * the same {@link computeStdErr} band.
+ *
+ * @param f - Completed fraction of the match by points (0..1).
+ * @param stdErr - The projection's spread band in percentage points.
+ * @param hasSpread - False when there are <2 stages (no spread yet); then only
+ *   completion drives it, so a tiny sample can't earn a solid dot for looking flat.
+ *
+ * Note: `K = 10pp` and the 0.6/0.4 blend are calibration constants — eyeball
+ * them against a live match.
+ */
+export function computeProjectionConfidence(f: number, stdErr: number, hasSpread: boolean): RivalConfidence {
+    const completionScore = clamp01(f / 0.6);                                        // ~60% of match (by points) ≈ fully sampled
+    const precisionScore = hasSpread ? clamp01(1 - stdErr / 10) : completionScore;   // a ~10pp band ≈ no precision
+    const score = 0.6 * completionScore + 0.4 * precisionScore;
+    return score >= 0.75 ? 'high' : score >= 0.45 ? 'medium' : 'low';
+}
+
+/**
  * Finds competitors whose average stage score percentage is closest to a reference competitor's,
  * regardless of whether they share any stages. Useful for identifying hidden rivals.
  *
@@ -382,10 +424,12 @@ export function findClosestRivals(
  * The live feed only contains competitors who have already shot, and the eventual
  * field size is unknown, so the headline metric is a percentile (rank / started-count),
  * which is unbiased as more competitors start (assuming the started field is a
- * representative sample). Confidence and the best/worst range are driven by the
- * fraction of the match completed *by points* (not stage count), so a competitor who
- * has only shot small stages is correctly shown as less certain — the range widens by
- * the unseen-points fraction, bounded by their own stage-to-stage spread.
+ * representative sample). The best/worst range is driven by the fraction of the match
+ * completed *by points* (not stage count), so a competitor who has only shot small
+ * stages is correctly shown as less certain — the range widens by the unseen-points
+ * fraction, bounded by their own stage-to-stage spread. Confidence shares that spread
+ * band (see {@link computeProjectionConfidence}), so the dot and the range agree: a
+ * streaky shooter reads less confident than a metronome at the same completion.
  *
  * @param referenceKey - Competitor to project.
  * @param scores - Full ranked standings (total-score order); used for currentPosition.
@@ -424,21 +468,11 @@ export function computeProjectedFinish(
     // Range: weighted spread of their stage %s, widened by the unseen fraction of the
     // match. At f=1 this is just the (weighted) standard error of the mean; as f→0 it
     // approaches their full stage-to-stage spread. Collapses with <2 stages.
-    let stdErr = 0;
-    if (ref.count >= 2 && sumW > 0) {
-        const weightedVar = ref.pcts.reduce((s, p, i) => s + ref.weights[i] * (p - ref.avg) ** 2, 0) / sumW;
-        const sw = Math.sqrt(weightedVar);
-        const nEff = sumW ** 2 / ref.weights.reduce((s, w) => s + w * w, 0); // Kish effective N
-        stdErr = sw * Math.sqrt((f * f) / Math.max(nEff, 1) + (1 - f) ** 2);
-    }
+    const stdErr = computeStdErr(ref.pcts, ref.weights, ref.avg, f);
     const projectedBestPosition = rankAt(ref.avg + stdErr);
     const projectedWorstPosition = rankAt(ref.avg - stdErr);
 
     const toPercentile = (pos: number): number => (startedCount > 0 ? (pos / startedCount) * 100 : 0);
-
-    // Confidence keyed off completed-points fraction (effective stages-by-points),
-    // not raw stage count — equal-weight stages reduce this to count-based behaviour.
-    const effStages = f * totalStages;
 
     const currentPosition = 1 + scores.findIndex(c => c.competitorKey === referenceKey);
 
@@ -456,7 +490,8 @@ export function computeProjectedFinish(
         refAvgPct: ref.avg,
         projectedPctOfWinner,
         startedCount,
-        confidence: computeConfidence(effStages, effStages, totalStages),
+        // Consistency-aware: completion (f) blended with the projection's own spread band.
+        confidence: computeProjectionConfidence(f, stdErr, ref.count >= 2),
         stdErr,
     };
 }
@@ -466,9 +501,9 @@ export function computeProjectedFinish(
  * that corrects the mid-competition bias of the accumulated-total standings: competitors
  * who have shot fewer stages are no longer pushed down just for having a smaller total.
  *
- * Each entry carries a `confidence` (driven by completed-points fraction, so thin /
- * small-stage-only data is flagged) and is included only if the competitor has shot at
- * least one scored stage.
+ * Each entry carries a `confidence` (completion by points blended with the entry's own
+ * stage-to-stage spread, so thin, small-stage-only, or streaky data is flagged) and is
+ * included only if the competitor has shot at least one scored stage.
  *
  * @param scores - Live standings (any order); the started subset is re-ranked by avg %.
  * @param stages - Stages to rank against (already stage/category filtered by caller).
@@ -478,7 +513,6 @@ export function computeProjectedStandings(
     scores: CompetitorWithTotalScore[],
     stages: Stage[],
 ): ProjectedStandingEntry[] {
-    const totalStages = new Set(stages.map(s => s.stage)).size;
     const totalPoints = matchTotalPoints(stages);
 
     // Started field: competitors who have shot at least one scored stage.
@@ -487,9 +521,11 @@ export function computeProjectedStandings(
             const a = getCompetitorAvgPct(c.competitorKey, stages);
             if (!a) return null;
             const sumW = a.weights.reduce((s, w) => s + w, 0);
-            return { competitor: c, avg: a.avg, count: a.count, pointsFrac: totalPoints > 0 ? clamp01(sumW / totalPoints) : 0 };
+            const pointsFrac = totalPoints > 0 ? clamp01(sumW / totalPoints) : 0;
+            const stdErr = computeStdErr(a.pcts, a.weights, a.avg, pointsFrac);
+            return { competitor: c, avg: a.avg, count: a.count, pointsFrac, stdErr };
         })
-        .filter((x): x is { competitor: CompetitorWithTotalScore; avg: number; count: number; pointsFrac: number } => x !== null);
+        .filter((x): x is { competitor: CompetitorWithTotalScore; avg: number; count: number; pointsFrac: number; stdErr: number } => x !== null);
 
     const maxAvg = field.reduce((m, e) => Math.max(m, e.avg), 0);
     const sorted = [...field].sort((a, b) => b.avg - a.avg);
@@ -502,14 +538,14 @@ export function computeProjectedStandings(
             rank = idx + 1;
             prevAvg = e.avg;
         }
-        const effStages = e.pointsFrac * totalStages;
         return {
             competitor: e.competitor,
             avgPct: e.avg,
             stagesShot: e.count,
             projectedPosition: rank,
             projectedPctOfWinner: maxAvg > 0 ? (e.avg / maxAvg) * 100 : 0,
-            confidence: computeConfidence(effStages, effStages, totalStages),
+            // Consistency-aware: completion blended with each entry's own spread band.
+            confidence: computeProjectionConfidence(e.pointsFrac, e.stdErr, e.count >= 2),
         };
     });
 }

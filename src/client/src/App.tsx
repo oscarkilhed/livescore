@@ -618,7 +618,7 @@ function App() {
             <div className="projection-headline">
               <span
                 className={`rival-confidence-dot rival-confidence-${projection.confidence}`}
-                title={`Confidence: ${projection.confidence} — based on ${projection.currentStagesShot} of ${projection.totalStages} stages shot`}
+                title={`Confidence: ${projection.confidence} — reflects how much of the match is done (${projection.currentStagesShot} of ${projection.totalStages} stages, by points) and how consistent the stage scores are`}
               />
               <span className="projection-headline-value">Projected top {projection.projectedPercentile.toFixed(0)}%</span>
               <span className="projection-headline-pos">
@@ -738,7 +738,7 @@ function App() {
           <span className="row-left">
             <span
               className={`rival-confidence-dot rival-confidence-${confidence}`}
-              title={`Confidence: ${confidence} — based on ${entry.stagesShot} stage${entry.stagesShot === 1 ? '' : 's'} shot`}
+              title={`Confidence: ${confidence} — reflects how much of the match is done (${entry.stagesShot} stage${entry.stagesShot === 1 ? '' : 's'} shot, by points) and how consistent the stage scores are`}
             />
             <span className="rank">#{projectedPosition}</span>
             <span className="competitor-name" onClick={() => toggleCompetitorDetails(competitor.competitorKey)}>
@@ -1065,7 +1065,7 @@ function App() {
                     <h2>Projected standings</h2>
                     <p className="rivals-confidence-legend">
                       Field re-ranked by average stage % (projected finish).
-                      Dot shows reliability given stages shot so far —
+                      Dot shows reliability — how much of the match is done and how consistent the scores are —
                       <span className="rival-confidence-dot rival-confidence-high" /> solid,
                       <span className="rival-confidence-dot rival-confidence-medium" /> fair,
                       <span className="rival-confidence-dot rival-confidence-low" /> thin.

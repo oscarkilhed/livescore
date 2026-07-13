@@ -333,11 +333,52 @@ describe('points-weighted average', () => {
             raw.push(mkStage(s, comps));
         }
         const standings = computeProjectedStandings(buildScores(raw), raw);
-        const conf = (k: string) => standings.find(e => e.competitor.competitorKey === k)!.confidence;
-        // smallA & bigB both shot 3 stages, but bigB covers far more of the match's points.
-        expect(conf('smallA')).toBe('low');
-        expect(conf('bigB')).toBe('medium');
-        expect(conf('fullC')).toBe('high');
+        const rank = { low: 0, medium: 1, high: 2 } as const;
+        const conf = (k: string) => rank[standings.find(e => e.competitor.competitorKey === k)!.confidence];
+        // smallA & bigB both shot exactly 3 stages, yet bigB covers far more of the
+        // match's points — so its dot must be strictly more confident. Stage count alone
+        // doesn't decide confidence; completion by points does.
+        expect(conf('bigB')).toBeGreaterThan(conf('smallA'));
+        // Completing more of the match never lowers confidence.
+        expect(conf('fullC')).toBeGreaterThanOrEqual(conf('bigB'));
+    });
+
+    test('a streaky shooter reads less confident than a metronome at equal completion', () => {
+        // 5 equal-weight stages. M and S each shoot the same 3 stages with the same 80%
+        // average, but S is wildly streaky (60/80/100) while M is a metronome (80/80/80).
+        const raw = [
+            mkStage(1, [mkComp('L', 10), mkComp('M', 8), mkComp('S', 6)]),  // M 80%, S 60%
+            mkStage(2, [mkComp('L', 10), mkComp('M', 8), mkComp('S', 8)]),  // M 80%, S 80%
+            mkStage(3, [mkComp('L', 10), mkComp('M', 8), mkComp('S', 10)]), // M 80%, S 100%
+            mkStage(4, [mkComp('L', 10), mkComp('F', 7)]),
+            mkStage(5, [mkComp('L', 10), mkComp('F', 7)]),
+        ];
+        const scores = buildScores(raw);
+        const m = computeProjectedFinish('M', scores, raw)!;
+        const s = computeProjectedFinish('S', scores, raw)!;
+        // Identical completion and identical average → only consistency differs.
+        expect(m.refAvgPct).toBeCloseTo(s.refAvgPct, 6);
+        expect(m.currentStagesShot).toBe(s.currentStagesShot);
+        // The metronome has the tighter band and the more confident dot.
+        expect(s.stdErr).toBeGreaterThan(m.stdErr);
+        const rank = { low: 0, medium: 1, high: 2 } as const;
+        expect(rank[s.confidence]).toBeLessThan(rank[m.confidence]);
+    });
+
+    test('a single flat stage stays low — a tiny sample cannot earn a solid dot', () => {
+        // 5-stage match; X has shot only stage 1, so there is no spread signal yet and
+        // confidence falls back to completion alone.
+        const raw = [
+            mkStage(1, [mkComp('X', 10), mkComp('A', 8)]),
+            mkStage(2, [mkComp('A', 8)]),
+            mkStage(3, [mkComp('A', 8)]),
+            mkStage(4, [mkComp('A', 8)]),
+            mkStage(5, [mkComp('A', 8)]),
+        ];
+        const proj = computeProjectedFinish('X', buildScores(raw), raw)!;
+        expect(proj.currentStagesShot).toBe(1);
+        expect(proj.stdErr).toBe(0);         // no spread with one stage
+        expect(proj.confidence).toBe('low'); // completion-only fallback
     });
 
     test('range widens as less of the match (by points) is completed', () => {
