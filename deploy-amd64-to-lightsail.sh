@@ -210,6 +210,11 @@ SECRETS = [
     "GRAPHQL_SESSION_COOKIE",
     "GRAPHQL_AUTH_USERNAME",
     "GRAPHQL_AUTH_PASSWORD",
+    # Grafana Cloud OTLP: endpoint + Basic-auth header. Resolved the same way as
+    # the SSI secrets (env -> live service -> template) so redeploys don't wipe
+    # them. Leaving them blank simply disables monitoring (no endpoint = off).
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_HEADERS",
 ]
 PLACEHOLDERS = {"", "SET_ME"}
 

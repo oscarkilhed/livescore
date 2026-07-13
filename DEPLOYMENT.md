@@ -181,6 +181,29 @@ Or use the AWS Console to update the container service deployment.
 - `GRAPHQL_CACHE_IDLE_EVICTION_MS`: `3600000` (evict inactive entries after 1 hour)
 - `RESPONSE_CACHE_TTL_MS`: `5000` (response cache for identical requests, default 5 seconds)
 
+#### Monitoring (Grafana Cloud / OTLP)
+
+Metrics + logs are pushed directly to Grafana Cloud over OTLP. Monitoring is off
+unless an endpoint is provided. See the README's [Monitoring](README.md#monitoring-grafana-cloud)
+section for how to obtain these from Grafana Cloud.
+
+- `MONITORING_ENABLED`: `true` (set `false` to hard-disable)
+- `OTEL_EXPORTER_OTLP_ENDPOINT`: base OTLP endpoint, e.g. `https://otlp-gateway-<zone>.grafana.net/otlp`
+- `OTEL_EXPORTER_OTLP_HEADERS`: `Authorization=Basic <base64 of instanceID:token>`
+- `OTEL_EXPORTER_OTLP_PROTOCOL`: `http/protobuf`
+- `OTEL_SERVICE_NAME`: `livescore-server`
+- `OTEL_DEPLOYMENT_ENVIRONMENT`: `production`
+
+The endpoint and headers are treated as secrets by `deploy-amd64-to-lightsail.sh`
+and resolved with the same **environment → live service → template** precedence as
+`GRAPHQL_API_KEY`, so redeploys reuse the live values rather than wiping them.
+Provide them via the environment or `.env`:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp-gateway-<zone>.grafana.net/otlp
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic $(echo -n '<instanceID>:<token>' | base64)"
+```
+
 ## Troubleshooting
 
 ### Authentication Issues

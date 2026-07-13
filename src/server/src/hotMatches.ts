@@ -135,6 +135,27 @@ export function getHotMatches(
   return result.slice(0, Math.max(0, limit));
 }
 
+/**
+ * Number of matches with at least one visitor still inside the window. Prunes
+ * stale visitors/matches as a side effect (same lazy strategy as getHotMatches),
+ * so it's safe to call from a metrics gauge callback.
+ */
+export function getActiveMatchCount(
+  windowMs: number = DEFAULT_WINDOW_MS,
+  now: number = Date.now(),
+): number {
+  const cutoff = now - windowMs;
+  let active = 0;
+  for (const [key, entry] of activity.entries()) {
+    if (pruneVisitors(entry, cutoff) === 0) {
+      activity.delete(key);
+    } else {
+      active++;
+    }
+  }
+  return active;
+}
+
 /** Test helper: clear all tracked activity. */
 export function _resetHotMatches(): void {
   activity.clear();

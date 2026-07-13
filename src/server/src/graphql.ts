@@ -9,6 +9,8 @@ import fetch from 'node-fetch';
 import { Stage, Competitor, Hits } from './types';
 import { config } from './config';
 import { GraphQLError, ResultsRestrictedError } from './errors';
+import { logger } from './logger';
+import { recordCacheAccess, recordSsiQuery, recordCoalesced, SsiKind } from './metrics';
 
 // ============================================================================
 // GraphQL Types
@@ -1006,6 +1008,11 @@ export function fetchEventWithCache(
   eventId: string
 ): Promise<CachedEvent> {
   const cacheKey = `${contentType}-${eventId}`;
+  // A request arriving while a fetch for this event is already in flight will be
+  // coalesced onto it rather than triggering its own upstream call — track that.
+  if (inFlightEventFetches.has(cacheKey)) {
+    recordCoalesced();
+  }
   return singleFlight(inFlightEventFetches, cacheKey, () =>
     fetchEventFromSource(contentType, eventId),
   );
@@ -1016,6 +1023,28 @@ export function fetchEventWithCache(
  * by {@link fetchEventWithCache} for single-flight de-duplication — do not call
  * directly from request handlers, or concurrent requests won't be coalesced.
  */
+/**
+ * Runs an upstream SSI GraphQL query and records its latency/outcome as a metric,
+ * labeled by whether it was a full or incremental fetch. Errors are recorded and
+ * re-thrown so existing control flow (incremental fallback, error propagation) is
+ * unchanged.
+ */
+async function runSsiQuery<T>(
+  kind: SsiKind,
+  query: string,
+  variables: Record<string, unknown>,
+): Promise<T> {
+  const start = process.hrtime.bigint();
+  try {
+    const data = await executeQuery<T>(query, variables);
+    recordSsiQuery(kind, 'success', Number(process.hrtime.bigint() - start) / 1e9);
+    return data;
+  } catch (error) {
+    recordSsiQuery(kind, 'error', Number(process.hrtime.bigint() - start) / 1e9);
+    throw error;
+  }
+}
+
 async function fetchEventFromSource(
   contentType: number,
   eventId: string
@@ -1023,18 +1052,20 @@ async function fetchEventFromSource(
   const cacheKey = `${contentType}-${eventId}`;
   const cached = graphqlCache.get(cacheKey);
   const now = Date.now();
-  
+
   // Evict stale entries on each access (lightweight operation)
   evictStaleCacheEntries();
-  
+
   // Check if we have a valid cache entry
   if (cached && (now - cached.fetchedAt) < CACHE_MAX_AGE_MS) {
+    recordCacheAccess('graphql', 'hit');
     // Update last accessed time
     cached.lastAccessedAt = now;
-    
+
     // Try incremental update
     try {
-      const data = await executeQuery<{ event: GraphQLEvent | null }>(
+      const data = await runSsiQuery<{ event: GraphQLEvent | null }>(
+        'incremental',
         LIVE_SCORES_INCREMENTAL_QUERY,
         {
           contentType,
@@ -1074,12 +1105,17 @@ async function fetchEventFromSource(
       }
     } catch (error) {
       // If incremental update fails, fall through to full fetch
-      console.warn('Incremental update failed, performing full fetch:', error);
+      logger.warn(`Incremental update failed, performing full fetch: ${error instanceof Error ? error.message : String(error)}`, {
+        cacheKey,
+      });
     }
+  } else {
+    recordCacheAccess('graphql', 'miss');
   }
-  
+
   // Full fetch (first time or cache expired)
-  const data = await executeQuery<{ event: GraphQLEvent | null }>(
+  const data = await runSsiQuery<{ event: GraphQLEvent | null }>(
+    'full',
     LIVE_SCORES_QUERY,
     {
       contentType,
