@@ -101,6 +101,17 @@ export interface LiveScoresResult {
   stages: Stage[];
 }
 
+/**
+ * Raw, division-agnostic event data returned by {@link fetchEventWithCache}:
+ * the event name plus every division's untransformed GraphQL stages. Callers
+ * apply {@link transformStages} with a division filter to produce a
+ * {@link LiveScoresResult}.
+ */
+export interface CachedEvent {
+  eventName: string;
+  stages: GraphQLStage[];
+}
+
 // ============================================================================
 // GraphQL Query
 // ============================================================================
@@ -858,17 +869,41 @@ const graphqlCache: Map<string, GraphQLCacheEntry> = new Map();
 
 /**
  * Maximum age for cache entries before a full refresh is required
- * Default: 24 hours (competitions typically last 1-2 days)
+ * Default: 3 days (competitions typically last 1-2 days)
  * Configurable via config.graphqlCacheMaxAge
  */
 const CACHE_MAX_AGE_MS = config.graphqlCacheMaxAge;
 
 /**
  * Maximum time since last access before a cache entry is evicted
- * Default: 1 hour
+ * Default: 6 hours
  * Configurable via config.graphqlCacheIdleEviction
  */
 const CACHE_EVICTION_AGE_MS = config.graphqlCacheIdleEviction;
+
+/**
+ * Single-flight de-duplication: while a task for `key` is in flight, concurrent
+ * callers share its promise instead of each starting their own. The entry is
+ * cleared once the promise settles (resolve or reject), so the next call starts
+ * fresh. This protects the server from request stampedes — a burst of requests
+ * for the same event (e.g. when the burst cache is cold or has just expired, or
+ * while a slow SSI fetch is in progress) triggers at most one upstream call at a
+ * time; everyone else awaits the same result.
+ */
+export function singleFlight<T>(
+  inFlight: Map<string, Promise<T>>,
+  key: string,
+  task: () => Promise<T>,
+): Promise<T> {
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+  const p = task().finally(() => inFlight.delete(key));
+  inFlight.set(key, p);
+  return p;
+}
+
+/** In-flight event fetches, keyed the same way as {@link graphqlCache}. */
+const inFlightEventFetches = new Map<string, Promise<CachedEvent>>();
 
 /**
  * Evicts cache entries that haven't been accessed within CACHE_EVICTION_AGE_MS
@@ -949,21 +984,42 @@ function mergeUpdatedScorecards(
 }
 
 /**
- * Fetches live scores with incremental update support
- * 
- * On first call: Fetches all scorecards and caches them
- * On subsequent calls: Only fetches scorecards updated since last fetch
- * 
+ * Fetches an event's raw stages with incremental update support.
+ *
+ * On first call: Fetches all scorecards and caches them.
+ * On subsequent calls: Only fetches scorecards updated since last fetch.
+ *
+ * Deliberately division-agnostic: the SSI fetch always retrieves every division's
+ * scorecards, so callers filter the returned stages per-division via
+ * {@link transformStages}. This keeps the fetch (and any burst cache in front of
+ * it) keyed by event alone rather than per division.
+ *
+ * Concurrent calls for the same event are coalesced (single-flight) so a burst
+ * of requests triggers at most one upstream fetch at a time.
+ *
  * @param contentType - Content type ID (e.g., 22 for IPSC Match)
  * @param eventId - Event/match ID
- * @param division - Optional division code to filter by (e.g., 'hg18')
- * @returns LiveScoresResult containing event name and stages with competitors and scores
+ * @returns Event name and the raw (untransformed, unfiltered) GraphQL stages
  */
-export async function fetchLiveScoresWithCache(
+export function fetchEventWithCache(
   contentType: number,
-  eventId: string,
-  division?: string
-): Promise<LiveScoresResult> {
+  eventId: string
+): Promise<CachedEvent> {
+  const cacheKey = `${contentType}-${eventId}`;
+  return singleFlight(inFlightEventFetches, cacheKey, () =>
+    fetchEventFromSource(contentType, eventId),
+  );
+}
+
+/**
+ * The actual cache-aware fetch (incremental when possible, else full). Wrapped
+ * by {@link fetchEventWithCache} for single-flight de-duplication — do not call
+ * directly from request handlers, or concurrent requests won't be coalesced.
+ */
+async function fetchEventFromSource(
+  contentType: number,
+  eventId: string
+): Promise<CachedEvent> {
   const cacheKey = `${contentType}-${eventId}`;
   const cached = graphqlCache.get(cacheKey);
   const now = Date.now();
@@ -1005,14 +1061,14 @@ export async function fetchLiveScoresWithCache(
           
           return {
             eventName: mergedEvent.name,
-            stages: transformStages(mergedEvent.stages, division),
+            stages: mergedEvent.stages,
           };
         } else {
           // No updates, just update fetchedAt and return cached data
           cached.fetchedAt = now;
           return {
             eventName: cached.event.name,
-            stages: transformStages(cached.event.stages, division),
+            stages: cached.event.stages,
           };
         }
       }
@@ -1053,7 +1109,7 @@ export async function fetchLiveScoresWithCache(
   
   return {
     eventName: data.event.name,
-    stages: transformStages(data.event.stages, division),
+    stages: data.event.stages,
   };
 }
 
