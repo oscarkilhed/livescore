@@ -114,6 +114,10 @@ function App() {
   const [scores, setScores] = useState<CompetitorWithTotalScore[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set when the organizer has restricted this match's scores to organizers
+  // only (HTTP 403 / RESULTS_RESTRICTED). Shown as an informational notice
+  // rather than an error, since nothing is actually broken.
+  const [restrictedMessage, setRestrictedMessage] = useState<string | null>(null);
   const [expandedCompetitor, setExpandedCompetitor] = useState<string | null>(null);
   // Fetch on load when we have the required params (division defaults to 'all').
   const [shouldFetch, setShouldFetch] = useState(() => Boolean(initialMatchId && initialTypeId));
@@ -398,15 +402,25 @@ function App() {
     if (!typeId || !matchId || !division) return;
     setLoading(true);
     setError(null);
+    setRestrictedMessage(null);
     try {
       const baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : '/api';
       const response = await fetch(`${baseUrl}/${typeId}/${matchId}/${division}/parse`);
-      
+
       if (!response.ok) {
         // Try to parse error response for more details
         let errorMessage = 'Failed to fetch data';
         try {
           const errorData = await response.json();
+          // Organizer restricted scores to organizers only: surface as an
+          // informational notice, not an error, and clear any stale results.
+          if (errorData.code === 'RESULTS_RESTRICTED') {
+            setRestrictedMessage(errorData.error || errorData.message || 'Results for this match are restricted by the organizer.');
+            setStages([]);
+            setScores([]);
+            setComparison([]);
+            return;
+          }
           // Check if it's an SSI API timeout
           if (response.status === 504 || errorData.ssiApiTimeout) {
             errorMessage = errorData.message || errorData.error || 'The SSI (ShootnScoreIt) API timed out. The external service is responding slowly. Please try again in a moment.';
@@ -908,6 +922,12 @@ function App() {
       </div>
       {loading && <p className="loading">Loading...</p>}
       {error && <p className="error">{error}</p>}
+      {restrictedMessage && (
+        <div className="notice notice-restricted" role="status">
+          <span className="notice-icon" aria-hidden="true">🔒</span>
+          <p>{restrictedMessage}</p>
+        </div>
+      )}
       {scores.length > 0 && (
         <>
           <div className="view-tabs" role="tablist">

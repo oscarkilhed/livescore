@@ -7,6 +7,8 @@ import {
   DIVISION_DISPLAY_MAP,
   GraphQLScorecard,
   GraphQLStage,
+  GraphQLEvent,
+  isResultsRestricted,
   clearGraphQLCache,
   getGraphQLCacheStats,
 } from './graphql';
@@ -391,6 +393,49 @@ describe('GraphQL Module', () => {
     it('should clear all cache entries', () => {
       clearGraphQLCache();
       expect(getGraphQLCacheStats().size).toBe(0);
+    });
+  });
+
+  describe('isResultsRestricted', () => {
+    const stageWith = (count: number | undefined, scorecardIds: string[]): GraphQLStage => ({
+      id: `stage-${count}`,
+      number: 1,
+      name: 'Stage',
+      scorecards_count: count,
+      scorecards: scorecardIds.map((id) => ({ id } as GraphQLScorecard)),
+    });
+
+    const eventWith = (stages: GraphQLStage[]): GraphQLEvent => ({
+      id: '26645',
+      name: 'Test Match',
+      uses_stages: true,
+      stages,
+    });
+
+    it('detects restriction when scorecards exist but list is empty', () => {
+      const event = eventWith([stageWith(101, []), stageWith(108, [])]);
+      expect(isResultsRestricted(event)).toBe(true);
+    });
+
+    it('is false when scorecards are returned', () => {
+      const event = eventWith([stageWith(2, ['a', 'b']), stageWith(1, ['c'])]);
+      expect(isResultsRestricted(event)).toBe(false);
+    });
+
+    it('is false for an event with no scorecards at all (not yet scored)', () => {
+      const event = eventWith([stageWith(0, []), stageWith(0, [])]);
+      expect(isResultsRestricted(event)).toBe(false);
+    });
+
+    it('is false when scorecards_count is missing (older API / no data)', () => {
+      const event = eventWith([stageWith(undefined, [])]);
+      expect(isResultsRestricted(event)).toBe(false);
+    });
+
+    it('checks the whole event so a single populated stage is not a restriction', () => {
+      // Some stages empty, but at least one returns scorecards -> visible.
+      const event = eventWith([stageWith(50, []), stageWith(50, ['x'])]);
+      expect(isResultsRestricted(event)).toBe(false);
     });
   });
 });

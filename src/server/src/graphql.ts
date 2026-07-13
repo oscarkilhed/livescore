@@ -8,7 +8,7 @@
 import fetch from 'node-fetch';
 import { Stage, Competitor, Hits } from './types';
 import { config } from './config';
-import { GraphQLError } from './errors';
+import { GraphQLError, ResultsRestrictedError } from './errors';
 
 // ============================================================================
 // GraphQL Types
@@ -55,6 +55,12 @@ export interface GraphQLStage {
   number: number;
   name: string;
   scorecards: GraphQLScorecard[];
+  /**
+   * Total number of scorecards on the stage, regardless of visibility.
+   * When this is > 0 but `scorecards` is empty, the organizer has restricted
+   * scores to organizers only (see ResultsRestrictedError).
+   */
+  scorecards_count?: number;
 }
 
 /**
@@ -65,6 +71,12 @@ export interface GraphQLEvent {
   name: string;
   uses_stages: boolean;
   stages: GraphQLStage[];
+  /**
+   * Human-readable results-visibility setting, e.g.
+   * "Result and scores only shown to organizers". Used to explain the
+   * restricted state to the user.
+   */
+  get_results_display?: string;
 }
 
 /**
@@ -103,10 +115,12 @@ query GetLiveScores($contentType: Int!, $eventId: String!) {
     id
     name
     uses_stages
+    get_results_display
     stages {
       id
       number
       name
+      scorecards_count
       scorecards {
         id
         ... on IpscScoreCardNode {
@@ -420,6 +434,51 @@ export function transformStages(
       procedures: 0, // Stage-level procedures (individual competitor procedures are in competitor.procedures)
     };
   });
+}
+
+// ============================================================================
+// Results Visibility
+// ============================================================================
+
+/**
+ * Detects whether an event's scores are restricted to organizers.
+ *
+ * The SSI API returns an empty `scorecards` list (with HTTP 200 and no GraphQL
+ * error) when the organizer has set results to "only shown to organizers" and
+ * the requesting user is not an organizer of that event. The `scorecards_count`
+ * field still reports the true count, so a stage with `scorecards_count > 0` and
+ * an empty `scorecards` list is the reliable signal.
+ *
+ * Checked across the whole event (all stages) so a legitimately empty division
+ * filter is never mistaken for a restriction — filtering happens later.
+ *
+ * @param event - Raw GraphQL event data (must include `scorecards_count`)
+ * @returns true if scores exist but were withheld
+ */
+export function isResultsRestricted(event: GraphQLEvent): boolean {
+  let totalCount = 0;
+  let totalReturned = 0;
+
+  for (const stage of event.stages) {
+    totalCount += Number(stage.scorecards_count) || 0;
+    totalReturned += stage.scorecards?.length || 0;
+  }
+
+  return totalCount > 0 && totalReturned === 0;
+}
+
+/**
+ * Builds a user-facing error for the organizer-restricted state.
+ */
+function buildResultsRestrictedError(event: GraphQLEvent): ResultsRestrictedError {
+  const setting = event.get_results_display
+    ? ` (${event.get_results_display})`
+    : '';
+  return new ResultsRestrictedError(
+    `The organizer of "${event.name}" has restricted results for this match — ` +
+    `scores are only visible to organizers${setting}. ` +
+    `They will appear here once the organizer makes scores public.`
+  );
 }
 
 // ============================================================================
@@ -742,7 +801,11 @@ export async function fetchLiveScoresFromGraphQL(
   if (!data.event) {
     throw new GraphQLError(`Event not found: ${eventId}`, 404);
   }
-  
+
+  if (isResultsRestricted(data.event)) {
+    throw buildResultsRestrictedError(data.event);
+  }
+
   return transformStages(data.event.stages, division);
 }
 
@@ -971,7 +1034,14 @@ export async function fetchLiveScoresWithCache(
   if (!data.event) {
     throw new GraphQLError(`Event not found: ${eventId}`, 404);
   }
-  
+
+  // Organizer has restricted scores: the API returned an empty scorecard list
+  // even though scorecards exist. Surface a clear error instead of caching an
+  // empty (and misleading) result.
+  if (isResultsRestricted(data.event)) {
+    throw buildResultsRestrictedError(data.event);
+  }
+
   // Cache the result
   const lastUpdated = findLatestUpdateTimestamp(data.event);
   graphqlCache.set(cacheKey, {
