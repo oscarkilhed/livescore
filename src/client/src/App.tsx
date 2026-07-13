@@ -72,6 +72,31 @@ const ordinal = (n: number): string => {
 };
 
 /**
+ * Stable per-browser anonymous id used for unique-visitor counting on the
+ * server's "Live now" list. Generated once and persisted in localStorage;
+ * it is a random UUID with no personal information. Returns '' when storage or
+ * crypto are unavailable — the caller then omits the header and the server
+ * falls back to a hashed IP, so counting never regresses to raw requests.
+ */
+const VISITOR_ID_KEY = 'lsq-visitor-id';
+let cachedVisitorId: string | null = null;
+function getVisitorId(): string {
+  if (cachedVisitorId !== null) return cachedVisitorId;
+  try {
+    let id = window.localStorage.getItem(VISITOR_ID_KEY);
+    if (!id) {
+      id = window.crypto?.randomUUID?.() ??
+        `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+      window.localStorage.setItem(VISITOR_ID_KEY, id);
+    }
+    cachedVisitorId = id;
+  } catch {
+    cachedVisitorId = '';
+  }
+  return cachedVisitorId;
+}
+
+/**
  * The three result views the user pages between (swipe on touch, tap a tab on
  * desktop). Order matters: it defines swipe direction.
  */
@@ -410,7 +435,12 @@ function App() {
     setRestrictedMessage(null);
     try {
       const baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : '/api';
-      const response = await fetch(`${baseUrl}/${typeId}/${matchId}/${division}/parse`);
+      // Send our anonymous visitor id so the server counts unique viewers, not raw requests.
+      const visitorId = getVisitorId();
+      const response = await fetch(
+        `${baseUrl}/${typeId}/${matchId}/${division}/parse`,
+        visitorId ? { headers: { 'x-visitor-id': visitorId } } : undefined,
+      );
 
       if (!response.ok) {
         // Try to parse error response for more details

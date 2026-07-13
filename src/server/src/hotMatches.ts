@@ -3,18 +3,21 @@
  * ====================
  *
  * In-memory, best-effort popularity tracker. Every successful `/parse` request
- * records a hit for its match. `getHotMatches` returns the matches with the most
- * hits inside a sliding time window, so a landing page can surface the matches
- * people are currently looking at.
+ * records a hit for its match, keyed by a per-browser visitor id. `getHotMatches`
+ * returns the matches with the most *unique visitors* inside a sliding time
+ * window, so a landing page can surface the matches people are currently viewing.
  *
  * Notes:
+ * - Counting is by unique visitor (best-effort), not raw request volume, so one
+ *   person switching divisions or refetching does not inflate the number. The
+ *   visitor id is resolved upstream (client-supplied anonymous id, else hashed
+ *   IP); this module just dedups on whatever id it is handed.
  * - Storage is in-memory only. A restart clears it; it re-warms as soon as
  *   people load matches again. Events are short-lived so this is acceptable.
- * - Counting is by raw request volume (not unique people), matching the agreed
- *   metric. There is no client-side polling, so a hit roughly means "a match was
- *   opened/refetched", and the default window is generous (~60 min).
+ * - Each visitor's last-seen timestamp slides the window forward, so a viewer
+ *   who keeps the match open stays counted; one who leaves ages out after ~60 min.
  * - Pruning is lazy (done inside `getHotMatches`), so no background timer is
- *   needed and memory stays bounded by however many matches are active.
+ *   needed and memory stays bounded by unique visitors per active match.
  */
 
 /** Default sliding window for "recent" hits. */
@@ -26,8 +29,8 @@ interface MatchActivity {
   matchType: string;
   matchId: string;
   eventName: string;
-  /** Timestamps (ms) of recent hits, oldest first. */
-  hits: number[];
+  /** visitorId → last-seen timestamp (ms). Size is the unique-visitor count. */
+  visitors: Map<string, number>;
   /** Hit counts per division code, used to pick a concrete default division. */
   divisionHits: Map<string, number>;
 }
@@ -49,12 +52,17 @@ function keyFor(matchType: string, matchId: string): string {
 
 /**
  * Record a hit for a match. Called after a successful parse response.
+ *
+ * `visitorId` identifies the browser/person (client-supplied anonymous id, else
+ * hashed IP, resolved by the caller). Repeat views by the same id only refresh
+ * their last-seen timestamp, so they don't inflate the count.
  */
 export function recordHit(
   matchType: string,
   matchId: string,
   division: string,
   eventName: string,
+  visitorId: string,
   now: number = Date.now(),
 ): void {
   const key = keyFor(matchType, matchId);
@@ -64,23 +72,22 @@ export function recordHit(
       matchType,
       matchId,
       eventName,
-      hits: [],
+      visitors: new Map(),
       divisionHits: new Map(),
     };
     activity.set(key, entry);
   }
-  entry.hits.push(now);
+  entry.visitors.set(visitorId, now);
   if (eventName) entry.eventName = eventName;
   entry.divisionHits.set(division, (entry.divisionHits.get(division) ?? 0) + 1);
 }
 
-/** Drop hit timestamps older than the window; returns the kept count. */
-function pruneHits(entry: MatchActivity, cutoff: number): number {
-  // hits is oldest-first, so find the first index still within the window.
-  let i = 0;
-  while (i < entry.hits.length && entry.hits[i] < cutoff) i++;
-  if (i > 0) entry.hits = entry.hits.slice(i);
-  return entry.hits.length;
+/** Drop visitors last seen before the cutoff; returns the surviving unique count. */
+function pruneVisitors(entry: MatchActivity, cutoff: number): number {
+  for (const [id, lastSeen] of entry.visitors) {
+    if (lastSeen < cutoff) entry.visitors.delete(id);
+  }
+  return entry.visitors.size;
 }
 
 /** Pick the most-hit concrete division ('all' only if it's the sole option). */
@@ -98,8 +105,8 @@ function pickTopDivision(divisionHits: Map<string, number>): string {
 }
 
 /**
- * Return the hottest matches within the window, sorted by recent hit count desc.
- * Prunes stale timestamps and drops matches that have gone cold.
+ * Return the hottest matches within the window, sorted by unique-visitor count
+ * desc. Prunes stale visitors and drops matches that have gone cold.
  */
 export function getHotMatches(
   limit: number = DEFAULT_LIMIT,
@@ -110,7 +117,7 @@ export function getHotMatches(
   const result: HotMatch[] = [];
 
   for (const [key, entry] of activity.entries()) {
-    const count = pruneHits(entry, cutoff);
+    const count = pruneVisitors(entry, cutoff);
     if (count === 0) {
       activity.delete(key);
       continue;

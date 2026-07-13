@@ -34,7 +34,7 @@ function HotMatches({ matches, onSelect }: HotMatchesProps) {
               <span className="hot-match-name">
                 {match.eventName || `Match ${match.matchId}`}
               </span>
-              <span className="hot-match-count" title="Recent views">
+              <span className="hot-match-count" title="Viewers now">
                 <span className="hot-match-dot" aria-hidden="true" />
                 {match.count}
               </span>
