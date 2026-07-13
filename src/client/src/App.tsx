@@ -13,6 +13,7 @@ import {
 } from './StageOverlay';
 import OverlaySettingsModal from './OverlaySettingsModal';
 import HotMatches, { HotMatch } from './HotMatches';
+import { formatStageLabel } from './stageLabel';
 
 interface Division {
   value: string;
@@ -296,12 +297,15 @@ function App() {
       const padWidth = String(rotatedSequence.length).length;
       const entries: StageOverlayEntry[] = rotatedSequence.map((stageNum, seqIdx) => {
         const stageScore = competitor.stageScores.find(s => s.stage === stageNum)!;
-        const stageName = stageScore.stageName || `Stage ${stageNum}`;
+        // Pass the raw name + number through; the overlay composes the label so
+        // the "N — Name" format stays consistent with the rest of the app.
+        const rawStageName = stageScore.stageName;
 
         // Stage result params
         const stageStats = getStageStats(competitor.competitorKey, stageNum);
         const stageResultParams = {
-          stageName,
+          stageNumber: stageNum,
+          stageName: rawStageName,
           hitFactor: stageScore.hitFactor,
           time: stageScore.time,
           stageScore: stageScore.score,
@@ -338,8 +342,8 @@ function App() {
         }));
 
         const standingsParams = {
-          stageName,
           stageNumber: stageNum,
+          stageName: rawStageName,
           rows,
           movement,
           shooterTotalScore: rankingsNow.find(c => c.competitorKey === competitor.competitorKey)?.totalScore ?? 0,
@@ -347,7 +351,8 @@ function App() {
         };
 
         const seqNum = String(seqIdx + 1).padStart(padWidth, '0');
-        const filePrefix = `${seqNum}-${stageName.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+        const fileLabel = formatStageLabel(stageNum, rawStageName);
+        const filePrefix = `${seqNum}-${fileLabel.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
 
         return { stageResultParams, standingsParams, filePrefix };
       });
@@ -584,7 +589,7 @@ function App() {
           return (
             <div key={stageScore.stage} className="stage">
               <div className="stage-row">
-                <span className="stage-name">{stageScore.stageName || `Stage ${stageScore.stage}`}</span>
+                <span className="stage-name">{formatStageLabel(stageScore.stage, stageScore.stageName)}</span>
                 <span className="stage-placement">
                   #{stageStats.placement}/{stageStats.totalOnStage} · {stageStats.stagePercent}%
                 </span>
@@ -783,7 +788,7 @@ function App() {
   const stageNameMap = useMemo(() => {
     const map = new Map<number, string>();
     stages.forEach(s => {
-      map.set(s.stage, s.stageName || `Stage ${s.stage}`);
+      map.set(s.stage, formatStageLabel(s.stage, s.stageName));
     });
     return map;
   }, [stages]);
@@ -1089,7 +1094,7 @@ function App() {
           competitor={overlayModalCompetitor}
           startStage={overlayStartStage}
           availableStages={overlayModalCompetitor.stageScores
-            .map(s => ({ value: s.stage, label: s.stageName || `Stage ${s.stage}` }))
+            .map(s => ({ value: s.stage, label: formatStageLabel(s.stage, s.stageName) }))
             .sort((a, b) => a.value - b.value)}
           onStartStageChange={setOverlayStartStage}
           onDownload={handleModalDownload}
