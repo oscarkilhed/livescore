@@ -60,8 +60,8 @@ const getConfig = (): ServerConfig => {
     graphqlAuthPassword: process.env.GRAPHQL_AUTH_PASSWORD,
     graphqlTimeout: parseInt(process.env.GRAPHQL_TIMEOUT || '60000', 10), // Default 60 seconds
     graphqlCacheMaxAge: parseInt(process.env.GRAPHQL_CACHE_MAX_AGE_MS || String(3 * 24 * 60 * 60 * 1000), 10), // Default 3 days
-    graphqlCacheIdleEviction: parseInt(process.env.GRAPHQL_CACHE_IDLE_EVICTION_MS || String(60 * 60 * 1000), 10), // Default 1 hour
-    responseCacheTtl: parseInt(process.env.RESPONSE_CACHE_TTL_MS || '5000', 10), // Default 5 seconds
+    graphqlCacheIdleEviction: parseInt(process.env.GRAPHQL_CACHE_IDLE_EVICTION_MS || String(6 * 60 * 60 * 1000), 10), // Default 6 hours
+    responseCacheTtl: parseInt(process.env.RESPONSE_CACHE_TTL_MS || '30000', 10), // Default 30 seconds
     // Rate limiting configuration (enabled by default, set RATE_LIMIT_ENABLED=false to disable)
     rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== 'false',
     rateLimitWindowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10), // Default 15 minutes

@@ -89,6 +89,17 @@ export interface LiveScoresResult {
   stages: Stage[];
 }
 
+/**
+ * Raw, division-agnostic event data returned by {@link fetchEventWithCache}:
+ * the event name plus every division's untransformed GraphQL stages. Callers
+ * apply {@link transformStages} with a division filter to produce a
+ * {@link LiveScoresResult}.
+ */
+export interface CachedEvent {
+  eventName: string;
+  stages: GraphQLStage[];
+}
+
 // ============================================================================
 // GraphQL Query
 // ============================================================================
@@ -886,21 +897,24 @@ function mergeUpdatedScorecards(
 }
 
 /**
- * Fetches live scores with incremental update support
- * 
- * On first call: Fetches all scorecards and caches them
- * On subsequent calls: Only fetches scorecards updated since last fetch
- * 
+ * Fetches an event's raw stages with incremental update support.
+ *
+ * On first call: Fetches all scorecards and caches them.
+ * On subsequent calls: Only fetches scorecards updated since last fetch.
+ *
+ * Deliberately division-agnostic: the SSI fetch always retrieves every division's
+ * scorecards, so callers filter the returned stages per-division via
+ * {@link transformStages}. This keeps the fetch (and any burst cache in front of
+ * it) keyed by event alone rather than per division.
+ *
  * @param contentType - Content type ID (e.g., 22 for IPSC Match)
  * @param eventId - Event/match ID
- * @param division - Optional division code to filter by (e.g., 'hg18')
- * @returns LiveScoresResult containing event name and stages with competitors and scores
+ * @returns Event name and the raw (untransformed, unfiltered) GraphQL stages
  */
-export async function fetchLiveScoresWithCache(
+export async function fetchEventWithCache(
   contentType: number,
-  eventId: string,
-  division?: string
-): Promise<LiveScoresResult> {
+  eventId: string
+): Promise<CachedEvent> {
   const cacheKey = `${contentType}-${eventId}`;
   const cached = graphqlCache.get(cacheKey);
   const now = Date.now();
@@ -942,14 +956,14 @@ export async function fetchLiveScoresWithCache(
           
           return {
             eventName: mergedEvent.name,
-            stages: transformStages(mergedEvent.stages, division),
+            stages: mergedEvent.stages,
           };
         } else {
           // No updates, just update fetchedAt and return cached data
           cached.fetchedAt = now;
           return {
             eventName: cached.event.name,
-            stages: transformStages(cached.event.stages, division),
+            stages: cached.event.stages,
           };
         }
       }
@@ -983,7 +997,7 @@ export async function fetchLiveScoresWithCache(
   
   return {
     eventName: data.event.name,
-    stages: transformStages(data.event.stages, division),
+    stages: data.event.stages,
   };
 }
 

@@ -4,8 +4,7 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { config } from './config';
 import { AppError } from './errors';
-import { fetchLiveScoresWithCache, getGraphQLCacheStats, clearGraphQLCache, LiveScoresResult } from './graphql';
-import { Stage } from './types';
+import { fetchEventWithCache, getGraphQLCacheStats, clearGraphQLCache, transformStages, CachedEvent } from './graphql';
 import { recordHit, getHotMatches, DEFAULT_LIMIT } from './hotMatches';
 
 // ============================================================================
@@ -13,12 +12,13 @@ import { recordHit, getHotMatches, DEFAULT_LIMIT } from './hotMatches';
 // ============================================================================
 
 /**
- * Short-lived cache for parsed stage responses
- * Prevents multiple clients from hitting the API simultaneously
+ * Short-lived burst cache for parsed events. Keyed by event (matchType-matchId),
+ * NOT by division: the underlying SSI fetch always returns every division's
+ * scorecards, so one entry serves all divisions and each division is filtered
+ * out of the cached raw stages at response time. This stops N divisions of the
+ * same match from triggering N fetches inside the burst window.
  */
-interface ResponseCacheEntry {
-  eventName: string;
-  stages: Stage[];
+interface ResponseCacheEntry extends CachedEvent {
   timestamp: number;
 }
 
@@ -26,15 +26,15 @@ const responseCache: Map<string, ResponseCacheEntry> = new Map();
 
 /**
  * Response cache TTL in milliseconds
- * Default: 5 seconds - short enough for live updates, long enough to batch requests
- * Configurable via config.responseCacheTtl
+ * Default: 30 seconds - short enough for near-live updates, long enough to batch
+ * bursts (including across divisions). Configurable via config.responseCacheTtl.
  */
 const RESPONSE_CACHE_TTL_MS = config.responseCacheTtl;
 
 /**
- * Get cached response or null if expired/missing
+ * Get the cached raw event or null if expired/missing.
  */
-function getCachedResponse(key: string): LiveScoresResult | null {
+function getCachedResponse(key: string): CachedEvent | null {
   const entry = responseCache.get(key);
   if (entry && Date.now() - entry.timestamp < RESPONSE_CACHE_TTL_MS) {
     return { eventName: entry.eventName, stages: entry.stages };
@@ -43,12 +43,12 @@ function getCachedResponse(key: string): LiveScoresResult | null {
 }
 
 /**
- * Store response in cache
+ * Store a raw event in the burst cache.
  */
-function setCachedResponse(key: string, result: LiveScoresResult): void {
+function setCachedResponse(key: string, event: CachedEvent): void {
   responseCache.set(key, {
-    eventName: result.eventName,
-    stages: result.stages,
+    eventName: event.eventName,
+    stages: event.stages,
     timestamp: Date.now()
   });
 }
@@ -158,25 +158,31 @@ app.get('/:matchType/:matchId/:division/parse', async (req, res) => {
   }
 
   try {
-    const cacheKey = `${matchType}-${matchId}-${division}`;
-    
+    // Burst cache is keyed by event, not division — the fetch returns every
+    // division's scorecards, and we filter the requested division at serve time.
+    const cacheKey = `${matchType}-${matchId}`;
+    const contentType = parseInt(matchType, 10);
+
     // Check response cache first (short TTL)
-    const cachedResult = getCachedResponse(cacheKey);
-    if (cachedResult) {
+    const cachedEvent = getCachedResponse(cacheKey);
+    if (cachedEvent) {
       // Cache hits are still real views — count them for hot-match tracking.
-      recordHit(matchType, matchId, division, cachedResult.eventName);
-      return res.json(cachedResult);
+      recordHit(matchType, matchId, division, cachedEvent.eventName);
+      return res.json({
+        eventName: cachedEvent.eventName,
+        stages: transformStages(cachedEvent.stages, division),
+      });
     }
 
-    // Fetch from GraphQL API
-    const contentType = parseInt(matchType, 10);
-    const result = await fetchLiveScoresWithCache(contentType, matchId, division);
+    // Fetch the full event (all divisions) from the GraphQL API and cache it.
+    const event = await fetchEventWithCache(contentType, matchId);
+    setCachedResponse(cacheKey, event);
 
-    // Cache the response
-    setCachedResponse(cacheKey, result);
-
-    recordHit(matchType, matchId, division, result.eventName);
-    res.json(result);
+    recordHit(matchType, matchId, division, event.eventName);
+    res.json({
+      eventName: event.eventName,
+      stages: transformStages(event.stages, division),
+    });
   } catch (error) {
     if (error instanceof AppError) {
       // Log timeout errors with more detail
