@@ -111,7 +111,7 @@ function calculateStageScore(competitor: Competitor, maxHitFactor: number, maxPo
     if (!maxHitFactor || maxHitFactor <= 0) {
         return {
             stage: stageNumber,
-            stageName: stageName || `Stage ${stageNumber}`,
+            stageName,
             score: 0,
             hits: competitor.hits,
             points: competitor.points || 0,
@@ -129,7 +129,7 @@ function calculateStageScore(competitor: Competitor, maxHitFactor: number, maxPo
 
     return {
         stage: stageNumber,
-        stageName: stageName || `Stage ${stageNumber}`,
+        stageName,
         score: stageScore,
         hits: competitor.hits,
         points: competitor.points || 0,
