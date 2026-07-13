@@ -8,7 +8,7 @@
 import fetch from 'node-fetch';
 import { Stage, Competitor, Hits } from './types';
 import { config } from './config';
-import { GraphQLError } from './errors';
+import { GraphQLError, ResultsRestrictedError } from './errors';
 
 // ============================================================================
 // GraphQL Types
@@ -55,6 +55,12 @@ export interface GraphQLStage {
   number: number;
   name: string;
   scorecards: GraphQLScorecard[];
+  /**
+   * Total number of scorecards on the stage, regardless of visibility.
+   * When this is > 0 but `scorecards` is empty, the organizer has restricted
+   * scores to organizers only (see ResultsRestrictedError).
+   */
+  scorecards_count?: number;
 }
 
 /**
@@ -65,6 +71,12 @@ export interface GraphQLEvent {
   name: string;
   uses_stages: boolean;
   stages: GraphQLStage[];
+  /**
+   * Human-readable results-visibility setting, e.g.
+   * "Result and scores only shown to organizers". Used to explain the
+   * restricted state to the user.
+   */
+  get_results_display?: string;
 }
 
 /**
@@ -89,6 +101,17 @@ export interface LiveScoresResult {
   stages: Stage[];
 }
 
+/**
+ * Raw, division-agnostic event data returned by {@link fetchEventWithCache}:
+ * the event name plus every division's untransformed GraphQL stages. Callers
+ * apply {@link transformStages} with a division filter to produce a
+ * {@link LiveScoresResult}.
+ */
+export interface CachedEvent {
+  eventName: string;
+  stages: GraphQLStage[];
+}
+
 // ============================================================================
 // GraphQL Query
 // ============================================================================
@@ -103,10 +126,12 @@ query GetLiveScores($contentType: Int!, $eventId: String!) {
     id
     name
     uses_stages
+    get_results_display
     stages {
       id
       number
       name
+      scorecards_count
       scorecards {
         id
         ... on IpscScoreCardNode {
@@ -420,6 +445,51 @@ export function transformStages(
       procedures: 0, // Stage-level procedures (individual competitor procedures are in competitor.procedures)
     };
   });
+}
+
+// ============================================================================
+// Results Visibility
+// ============================================================================
+
+/**
+ * Detects whether an event's scores are restricted to organizers.
+ *
+ * The SSI API returns an empty `scorecards` list (with HTTP 200 and no GraphQL
+ * error) when the organizer has set results to "only shown to organizers" and
+ * the requesting user is not an organizer of that event. The `scorecards_count`
+ * field still reports the true count, so a stage with `scorecards_count > 0` and
+ * an empty `scorecards` list is the reliable signal.
+ *
+ * Checked across the whole event (all stages) so a legitimately empty division
+ * filter is never mistaken for a restriction — filtering happens later.
+ *
+ * @param event - Raw GraphQL event data (must include `scorecards_count`)
+ * @returns true if scores exist but were withheld
+ */
+export function isResultsRestricted(event: GraphQLEvent): boolean {
+  let totalCount = 0;
+  let totalReturned = 0;
+
+  for (const stage of event.stages) {
+    totalCount += Number(stage.scorecards_count) || 0;
+    totalReturned += stage.scorecards?.length || 0;
+  }
+
+  return totalCount > 0 && totalReturned === 0;
+}
+
+/**
+ * Builds a user-facing error for the organizer-restricted state.
+ */
+function buildResultsRestrictedError(event: GraphQLEvent): ResultsRestrictedError {
+  const setting = event.get_results_display
+    ? ` (${event.get_results_display})`
+    : '';
+  return new ResultsRestrictedError(
+    `The organizer of "${event.name}" has restricted results for this match — ` +
+    `scores are only visible to organizers${setting}. ` +
+    `They will appear here once the organizer makes scores public.`
+  );
 }
 
 // ============================================================================
@@ -742,7 +812,11 @@ export async function fetchLiveScoresFromGraphQL(
   if (!data.event) {
     throw new GraphQLError(`Event not found: ${eventId}`, 404);
   }
-  
+
+  if (isResultsRestricted(data.event)) {
+    throw buildResultsRestrictedError(data.event);
+  }
+
   return transformStages(data.event.stages, division);
 }
 
@@ -795,17 +869,41 @@ const graphqlCache: Map<string, GraphQLCacheEntry> = new Map();
 
 /**
  * Maximum age for cache entries before a full refresh is required
- * Default: 24 hours (competitions typically last 1-2 days)
+ * Default: 3 days (competitions typically last 1-2 days)
  * Configurable via config.graphqlCacheMaxAge
  */
 const CACHE_MAX_AGE_MS = config.graphqlCacheMaxAge;
 
 /**
  * Maximum time since last access before a cache entry is evicted
- * Default: 1 hour
+ * Default: 6 hours
  * Configurable via config.graphqlCacheIdleEviction
  */
 const CACHE_EVICTION_AGE_MS = config.graphqlCacheIdleEviction;
+
+/**
+ * Single-flight de-duplication: while a task for `key` is in flight, concurrent
+ * callers share its promise instead of each starting their own. The entry is
+ * cleared once the promise settles (resolve or reject), so the next call starts
+ * fresh. This protects the server from request stampedes — a burst of requests
+ * for the same event (e.g. when the burst cache is cold or has just expired, or
+ * while a slow SSI fetch is in progress) triggers at most one upstream call at a
+ * time; everyone else awaits the same result.
+ */
+export function singleFlight<T>(
+  inFlight: Map<string, Promise<T>>,
+  key: string,
+  task: () => Promise<T>,
+): Promise<T> {
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+  const p = task().finally(() => inFlight.delete(key));
+  inFlight.set(key, p);
+  return p;
+}
+
+/** In-flight event fetches, keyed the same way as {@link graphqlCache}. */
+const inFlightEventFetches = new Map<string, Promise<CachedEvent>>();
 
 /**
  * Evicts cache entries that haven't been accessed within CACHE_EVICTION_AGE_MS
@@ -886,21 +984,42 @@ function mergeUpdatedScorecards(
 }
 
 /**
- * Fetches live scores with incremental update support
- * 
- * On first call: Fetches all scorecards and caches them
- * On subsequent calls: Only fetches scorecards updated since last fetch
- * 
+ * Fetches an event's raw stages with incremental update support.
+ *
+ * On first call: Fetches all scorecards and caches them.
+ * On subsequent calls: Only fetches scorecards updated since last fetch.
+ *
+ * Deliberately division-agnostic: the SSI fetch always retrieves every division's
+ * scorecards, so callers filter the returned stages per-division via
+ * {@link transformStages}. This keeps the fetch (and any burst cache in front of
+ * it) keyed by event alone rather than per division.
+ *
+ * Concurrent calls for the same event are coalesced (single-flight) so a burst
+ * of requests triggers at most one upstream fetch at a time.
+ *
  * @param contentType - Content type ID (e.g., 22 for IPSC Match)
  * @param eventId - Event/match ID
- * @param division - Optional division code to filter by (e.g., 'hg18')
- * @returns LiveScoresResult containing event name and stages with competitors and scores
+ * @returns Event name and the raw (untransformed, unfiltered) GraphQL stages
  */
-export async function fetchLiveScoresWithCache(
+export function fetchEventWithCache(
   contentType: number,
-  eventId: string,
-  division?: string
-): Promise<LiveScoresResult> {
+  eventId: string
+): Promise<CachedEvent> {
+  const cacheKey = `${contentType}-${eventId}`;
+  return singleFlight(inFlightEventFetches, cacheKey, () =>
+    fetchEventFromSource(contentType, eventId),
+  );
+}
+
+/**
+ * The actual cache-aware fetch (incremental when possible, else full). Wrapped
+ * by {@link fetchEventWithCache} for single-flight de-duplication — do not call
+ * directly from request handlers, or concurrent requests won't be coalesced.
+ */
+async function fetchEventFromSource(
+  contentType: number,
+  eventId: string
+): Promise<CachedEvent> {
   const cacheKey = `${contentType}-${eventId}`;
   const cached = graphqlCache.get(cacheKey);
   const now = Date.now();
@@ -942,14 +1061,14 @@ export async function fetchLiveScoresWithCache(
           
           return {
             eventName: mergedEvent.name,
-            stages: transformStages(mergedEvent.stages, division),
+            stages: mergedEvent.stages,
           };
         } else {
           // No updates, just update fetchedAt and return cached data
           cached.fetchedAt = now;
           return {
             eventName: cached.event.name,
-            stages: transformStages(cached.event.stages, division),
+            stages: cached.event.stages,
           };
         }
       }
@@ -971,7 +1090,14 @@ export async function fetchLiveScoresWithCache(
   if (!data.event) {
     throw new GraphQLError(`Event not found: ${eventId}`, 404);
   }
-  
+
+  // Organizer has restricted scores: the API returned an empty scorecard list
+  // even though scorecards exist. Surface a clear error instead of caching an
+  // empty (and misleading) result.
+  if (isResultsRestricted(data.event)) {
+    throw buildResultsRestrictedError(data.event);
+  }
+
   // Cache the result
   const lastUpdated = findLatestUpdateTimestamp(data.event);
   graphqlCache.set(cacheKey, {
@@ -983,7 +1109,7 @@ export async function fetchLiveScoresWithCache(
   
   return {
     eventName: data.event.name,
-    stages: transformStages(data.event.stages, division),
+    stages: data.event.stages,
   };
 }
 

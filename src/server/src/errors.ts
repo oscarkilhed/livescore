@@ -61,3 +61,17 @@ export class GraphQLError extends AppError {
     super(message, 'GRAPHQL_ERROR', statusCode, cause);
   }
 }
+
+/**
+ * Error thrown when the event has scores but the organizer has restricted them
+ * to organizers only, so the API returns an empty scorecard list.
+ *
+ * Detected when a stage's `scorecards_count` is greater than zero while the
+ * `scorecards` list comes back empty (see graphql.ts). Surfaced to the client
+ * so it can explain the blank state instead of showing an empty results view.
+ */
+export class ResultsRestrictedError extends AppError {
+  constructor(message: string) {
+    super(message, 'RESULTS_RESTRICTED', 403);
+  }
+}

@@ -7,8 +7,11 @@ import {
   DIVISION_DISPLAY_MAP,
   GraphQLScorecard,
   GraphQLStage,
+  GraphQLEvent,
+  isResultsRestricted,
   clearGraphQLCache,
   getGraphQLCacheStats,
+  singleFlight,
 } from './graphql';
 
 describe('GraphQL Module', () => {
@@ -392,6 +395,126 @@ describe('GraphQL Module', () => {
       clearGraphQLCache();
       expect(getGraphQLCacheStats().size).toBe(0);
     });
+  });
+
+  describe('isResultsRestricted', () => {
+    const stageWith = (count: number | undefined, scorecardIds: string[]): GraphQLStage => ({
+      id: `stage-${count}`,
+      number: 1,
+      name: 'Stage',
+      scorecards_count: count,
+      scorecards: scorecardIds.map((id) => ({ id } as GraphQLScorecard)),
+    });
+
+    const eventWith = (stages: GraphQLStage[]): GraphQLEvent => ({
+      id: '26645',
+      name: 'Test Match',
+      uses_stages: true,
+      stages,
+    });
+
+    it('detects restriction when scorecards exist but list is empty', () => {
+      const event = eventWith([stageWith(101, []), stageWith(108, [])]);
+      expect(isResultsRestricted(event)).toBe(true);
+    });
+
+    it('is false when scorecards are returned', () => {
+      const event = eventWith([stageWith(2, ['a', 'b']), stageWith(1, ['c'])]);
+      expect(isResultsRestricted(event)).toBe(false);
+    });
+
+    it('is false for an event with no scorecards at all (not yet scored)', () => {
+      const event = eventWith([stageWith(0, []), stageWith(0, [])]);
+      expect(isResultsRestricted(event)).toBe(false);
+    });
+
+    it('is false when scorecards_count is missing (older API / no data)', () => {
+      const event = eventWith([stageWith(undefined, [])]);
+      expect(isResultsRestricted(event)).toBe(false);
+    });
+
+    it('checks the whole event so a single populated stage is not a restriction', () => {
+      // Some stages empty, but at least one returns scorecards -> visible.
+      const event = eventWith([stageWith(50, []), stageWith(50, ['x'])]);
+      expect(isResultsRestricted(event)).toBe(false);
+    });
+  });
+});
+
+describe('singleFlight', () => {
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  it('coalesces concurrent calls for the same key into one task run', async () => {
+    const map = new Map<string, Promise<number>>();
+    let runs = 0;
+    const d = deferred<number>();
+    const task = () => {
+      runs++;
+      return d.promise;
+    };
+
+    const p1 = singleFlight(map, 'k', task);
+    const p2 = singleFlight(map, 'k', task);
+    const p3 = singleFlight(map, 'k', task);
+
+    expect(runs).toBe(1); // only one upstream call despite three callers
+    d.resolve(42);
+    await expect(Promise.all([p1, p2, p3])).resolves.toEqual([42, 42, 42]);
+  });
+
+  it('starts a fresh task once the previous one has settled', async () => {
+    const map = new Map<string, Promise<number>>();
+    let runs = 0;
+    const task = () => Promise.resolve(++runs);
+
+    const first = await singleFlight(map, 'k', task);
+    const second = await singleFlight(map, 'k', task);
+
+    expect(runs).toBe(2);
+    expect(first).toBe(1);
+    expect(second).toBe(2);
+  });
+
+  it('does not coalesce across different keys', () => {
+    const map = new Map<string, Promise<number>>();
+    let runs = 0;
+    const task = () => Promise.resolve(++runs);
+
+    singleFlight(map, 'a', task);
+    singleFlight(map, 'b', task);
+
+    expect(runs).toBe(2);
+  });
+
+  it('propagates rejection to all awaiters and clears the in-flight entry', async () => {
+    const map = new Map<string, Promise<number>>();
+    let runs = 0;
+    const d = deferred<number>();
+    const failing = () => {
+      runs++;
+      return d.promise;
+    };
+
+    const p1 = singleFlight(map, 'k', failing);
+    const p2 = singleFlight(map, 'k', failing);
+    expect(runs).toBe(1);
+
+    d.reject(new Error('boom'));
+    await expect(p1).rejects.toThrow('boom');
+    await expect(p2).rejects.toThrow('boom');
+
+    // The failed entry was cleared, so the next call runs the task afresh.
+    const ok = await singleFlight(map, 'k', () => Promise.resolve(7));
+    expect(runs).toBe(1); // the failing task did not run again
+    expect(ok).toBe(7);
   });
 });
 

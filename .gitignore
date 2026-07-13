@@ -48,3 +48,6 @@ src/mock-api/data/*.json
 
 # Claude Code - personal/local settings (launch.json is shared)
 .claude/settings.local.json
+
+# Personal roadmap (not tracked)
+ROADMAP.md

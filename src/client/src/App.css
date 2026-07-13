@@ -231,6 +231,31 @@ button:disabled {
   margin: 1rem 0;
 }
 
+/* Informational notice (e.g. organizer restricted results) — not an error. */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 1rem 0;
+  padding: 0.75rem 0.875rem;
+  border-radius: var(--radius-sm);
+}
+
+.notice p {
+  margin: 0;
+}
+
+.notice-restricted {
+  color: var(--warning-text);
+  background: var(--warning-soft);
+  border: 1px solid var(--warning);
+}
+
+.notice-icon {
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
 /* ── Control panel ──────────────────────────────────────────────── */
 .control-panel {
   background: var(--surface);
