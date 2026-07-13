@@ -4,7 +4,8 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { config } from './config';
 import { AppError } from './errors';
-import { fetchEventWithCache, getGraphQLCacheStats, clearGraphQLCache, transformStages, CachedEvent } from './graphql';
+import { fetchEventWithCache, getGraphQLCacheStats, clearGraphQLCache, transformStages, CachedEvent, LiveScoresResult } from './graphql';
+import { Stage } from './types';
 import { recordHit, getHotMatches, DEFAULT_LIMIT } from './hotMatches';
 
 // ============================================================================
@@ -14,12 +15,17 @@ import { recordHit, getHotMatches, DEFAULT_LIMIT } from './hotMatches';
 /**
  * Short-lived burst cache for parsed events. Keyed by event (matchType-matchId),
  * NOT by division: the underlying SSI fetch always returns every division's
- * scorecards, so one entry serves all divisions and each division is filtered
- * out of the cached raw stages at response time. This stops N divisions of the
- * same match from triggering N fetches inside the burst window.
+ * scorecards, so one entry serves all divisions.
+ *
+ * Each entry keeps the raw stages plus a per-division memo of the transformed
+ * result, so the (non-trivial) division transform runs at most once per division
+ * per entry — repeat requests for the same division are served straight from the
+ * memo, and a new division is transformed on demand from the same raw stages.
  */
 interface ResponseCacheEntry extends CachedEvent {
   timestamp: number;
+  /** division code (or 'all') -> transformed stages, populated lazily. */
+  transformed: Map<string, Stage[]>;
 }
 
 const responseCache: Map<string, ResponseCacheEntry> = new Map();
@@ -32,25 +38,36 @@ const responseCache: Map<string, ResponseCacheEntry> = new Map();
 const RESPONSE_CACHE_TTL_MS = config.responseCacheTtl;
 
 /**
- * Get the cached raw event or null if expired/missing.
+ * Return the transformed result for `division` from a fresh cache entry, or null
+ * if the entry is missing/expired. Transforms and memoizes on first access for a
+ * division so repeat requests skip the work.
  */
-function getCachedResponse(key: string): CachedEvent | null {
+function getCachedResponse(key: string, division: string): LiveScoresResult | null {
   const entry = responseCache.get(key);
-  if (entry && Date.now() - entry.timestamp < RESPONSE_CACHE_TTL_MS) {
-    return { eventName: entry.eventName, stages: entry.stages };
+  if (!entry || Date.now() - entry.timestamp >= RESPONSE_CACHE_TTL_MS) {
+    return null;
   }
-  return null;
+  let stages = entry.transformed.get(division);
+  if (!stages) {
+    stages = transformStages(entry.stages, division);
+    entry.transformed.set(division, stages);
+  }
+  return { eventName: entry.eventName, stages };
 }
 
 /**
- * Store a raw event in the burst cache.
+ * Store a freshly fetched raw event and return the transformed result for the
+ * requested division (also seeding that division's memo).
  */
-function setCachedResponse(key: string, event: CachedEvent): void {
+function setCachedResponse(key: string, event: CachedEvent, division: string): LiveScoresResult {
+  const stages = transformStages(event.stages, division);
   responseCache.set(key, {
     eventName: event.eventName,
     stages: event.stages,
-    timestamp: Date.now()
+    transformed: new Map([[division, stages]]),
+    timestamp: Date.now(),
   });
+  return { eventName: event.eventName, stages };
 }
 
 /**
@@ -163,26 +180,22 @@ app.get('/:matchType/:matchId/:division/parse', async (req, res) => {
     const cacheKey = `${matchType}-${matchId}`;
     const contentType = parseInt(matchType, 10);
 
-    // Check response cache first (short TTL)
-    const cachedEvent = getCachedResponse(cacheKey);
-    if (cachedEvent) {
+    // Check response cache first (short TTL). A hit returns the memoized
+    // transform for this division — no re-transformation.
+    const cached = getCachedResponse(cacheKey, division);
+    if (cached) {
       // Cache hits are still real views — count them for hot-match tracking.
-      recordHit(matchType, matchId, division, cachedEvent.eventName);
-      return res.json({
-        eventName: cachedEvent.eventName,
-        stages: transformStages(cachedEvent.stages, division),
-      });
+      recordHit(matchType, matchId, division, cached.eventName);
+      return res.json(cached);
     }
 
-    // Fetch the full event (all divisions) from the GraphQL API and cache it.
+    // Fetch the full event (all divisions) from the GraphQL API, cache the raw
+    // stages, and return the transformed result for the requested division.
     const event = await fetchEventWithCache(contentType, matchId);
-    setCachedResponse(cacheKey, event);
+    const result = setCachedResponse(cacheKey, event, division);
 
-    recordHit(matchType, matchId, division, event.eventName);
-    res.json({
-      eventName: event.eventName,
-      stages: transformStages(event.stages, division),
-    });
+    recordHit(matchType, matchId, division, result.eventName);
+    res.json(result);
   } catch (error) {
     if (error instanceof AppError) {
       // Log timeout errors with more detail
