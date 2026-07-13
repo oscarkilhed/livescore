@@ -9,6 +9,7 @@ import {
   GraphQLStage,
   clearGraphQLCache,
   getGraphQLCacheStats,
+  singleFlight,
 } from './graphql';
 
 describe('GraphQL Module', () => {
@@ -392,6 +393,83 @@ describe('GraphQL Module', () => {
       clearGraphQLCache();
       expect(getGraphQLCacheStats().size).toBe(0);
     });
+  });
+});
+
+describe('singleFlight', () => {
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  it('coalesces concurrent calls for the same key into one task run', async () => {
+    const map = new Map<string, Promise<number>>();
+    let runs = 0;
+    const d = deferred<number>();
+    const task = () => {
+      runs++;
+      return d.promise;
+    };
+
+    const p1 = singleFlight(map, 'k', task);
+    const p2 = singleFlight(map, 'k', task);
+    const p3 = singleFlight(map, 'k', task);
+
+    expect(runs).toBe(1); // only one upstream call despite three callers
+    d.resolve(42);
+    await expect(Promise.all([p1, p2, p3])).resolves.toEqual([42, 42, 42]);
+  });
+
+  it('starts a fresh task once the previous one has settled', async () => {
+    const map = new Map<string, Promise<number>>();
+    let runs = 0;
+    const task = () => Promise.resolve(++runs);
+
+    const first = await singleFlight(map, 'k', task);
+    const second = await singleFlight(map, 'k', task);
+
+    expect(runs).toBe(2);
+    expect(first).toBe(1);
+    expect(second).toBe(2);
+  });
+
+  it('does not coalesce across different keys', () => {
+    const map = new Map<string, Promise<number>>();
+    let runs = 0;
+    const task = () => Promise.resolve(++runs);
+
+    singleFlight(map, 'a', task);
+    singleFlight(map, 'b', task);
+
+    expect(runs).toBe(2);
+  });
+
+  it('propagates rejection to all awaiters and clears the in-flight entry', async () => {
+    const map = new Map<string, Promise<number>>();
+    let runs = 0;
+    const d = deferred<number>();
+    const failing = () => {
+      runs++;
+      return d.promise;
+    };
+
+    const p1 = singleFlight(map, 'k', failing);
+    const p2 = singleFlight(map, 'k', failing);
+    expect(runs).toBe(1);
+
+    d.reject(new Error('boom'));
+    await expect(p1).rejects.toThrow('boom');
+    await expect(p2).rejects.toThrow('boom');
+
+    // The failed entry was cleared, so the next call runs the task afresh.
+    const ok = await singleFlight(map, 'k', () => Promise.resolve(7));
+    expect(runs).toBe(1); // the failing task did not run again
+    expect(ok).toBe(7);
   });
 });
 
