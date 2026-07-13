@@ -25,9 +25,43 @@ The application consists of:
 - **Client** (`src/client/`): React-based frontend application
 - **Server** (`src/server/`): Express.js backend API that:
   - Fetches data from ShootnScoreIt.com GraphQL API
-  - Provides REST API endpoints with caching
+  - Provides REST API endpoints fronted by a multi-layer cache (see [Caching strategy](#caching-strategy))
 - **Mock API** (`src/mock-api/`): Local GraphQL server for development (see [Development with Mock API](#development-with-mock-api))
 - **Docker**: Containerized deployment with Docker Compose
+
+### Caching strategy
+
+ShootnScoreIt (SSI) is an external, shared service that can be slow under load, so
+the server is built to shield it: **many concurrent viewers of a match collapse to
+at most one upstream SSI call at a time, and refreshed views cost an incremental
+delta rather than a full re-fetch.** Three cooperating layers sit in front of the
+SSI GraphQL API (all in-memory — they reset on restart and re-warm on the next
+request):
+
+1. **Response (burst) cache** — keyed by *event* (`matchType-matchId`), TTL
+   `RESPONSE_CACHE_TTL_MS` (default 30s). A hit is served entirely from memory with
+   **zero SSI traffic**. The SSI fetch always returns every division's scorecards,
+   so one entry serves all divisions: the requested division is filtered from the
+   cached raw stages and **memoized per division**, so repeat requests skip both the
+   fetch *and* the transform. Switching divisions during the window reuses the same
+   cached event.
+
+2. **Single-flight coalescing** — while one fetch for an event is in flight, other
+   requests for that event await the *same* promise instead of launching their own.
+   This is what protects the server (and SSI) from a stampede when the burst cache is
+   cold or has just expired, or while a slow SSI response is pending: a burst of N
+   requests still triggers at most **one** upstream call.
+
+3. **GraphQL cache** — a per-event store of the last fetched data, max age
+   `GRAPHQL_CACHE_MAX_AGE_MS` (default 3 days). The first view does a full fetch;
+   subsequent views issue a cheap **incremental** query (only scorecards updated
+   since the last fetch, via `updated_after`) and merge the delta. Entries not
+   requested for `GRAPHQL_CACHE_IDLE_EVICTION_MS` (default 6h) are evicted.
+
+Net effect during a live match: the first viewer triggers one full fetch; everyone
+after that is served from the burst cache, and once it expires a single coalesced
+incremental query refreshes it — regardless of how many people or divisions are
+being watched.
 
 ## Prerequisites
 
@@ -138,9 +172,9 @@ The server can be configured using environment variables:
 - `GRAPHQL_AUTH_USERNAME`: Optional SSI username for JWT login mutation
 - `GRAPHQL_AUTH_PASSWORD`: Optional SSI password for JWT login mutation (must be set with username)
 - `GRAPHQL_TIMEOUT`: Timeout for GraphQL requests in ms (default: 60000)
-- `GRAPHQL_CACHE_MAX_AGE_MS`: Max age for GraphQL cache (default: 259200000 = 3 days)
-- `GRAPHQL_CACHE_IDLE_EVICTION_MS`: Idle eviction time (default: 3600000 = 1 hour)
-- `RESPONSE_CACHE_TTL_MS`: Response cache TTL (default: 5000)
+- `GRAPHQL_CACHE_MAX_AGE_MS`: Max age for GraphQL cache before a full re-fetch (default: 259200000 = 3 days)
+- `GRAPHQL_CACHE_IDLE_EVICTION_MS`: Evict an event after this long with no requests (default: 21600000 = 6 hours)
+- `RESPONSE_CACHE_TTL_MS`: Response (burst) cache TTL in ms (default: 30000 = 30 seconds)
 - `NODE_ENV`: Node environment - `development`, `production`, or `test`
 
 ## Development with Mock API
