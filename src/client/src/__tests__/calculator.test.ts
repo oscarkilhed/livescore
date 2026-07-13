@@ -1,5 +1,5 @@
 import { Stage, CompetitorWithTotalScore, StageScore, Competitor } from '../types';
-import { calculateMaxPossibleScores, calculateCompetitorScores, compareCompetitors, computeProjectedFinish, getCompetitorAvgPct, computeProjectedStandings } from '../calculator';
+import { calculateMaxPossibleScores, calculateCompetitorScores, compareCompetitors, computeProjectedFinish, getCompetitorAvgPct, computeProjectedStandings, computeProjectionConfidence } from '../calculator';
 // Use the parsed JSON directly
 import rawStages from './livescore.json';
 
@@ -415,5 +415,33 @@ describe('points-weighted average', () => {
             const total = scores.find(c => c.competitorKey === e.competitor.competitorKey)!.totalScore;
             expect(e.projectedPctOfWinner).toBeCloseTo((total / winnerTotal) * 100, 4);
         });
+    });
+});
+
+describe('computeProjectionConfidence (completion floors + consistency blend)', () => {
+    test('below the medium floor it is always low, however flat the shooting', () => {
+        // 15% of the match, perfectly consistent (stdErr 0) → still low.
+        expect(computeProjectionConfidence(0.15, 0, true)).toBe('low');
+        // Even a single flat stage worth <20% falls back to low.
+        expect(computeProjectionConfidence(0.10, 0, false)).toBe('low');
+    });
+
+    test('at/just above the medium floor a steady shooter reaches medium', () => {
+        expect(computeProjectionConfidence(0.20, 0, true)).toBe('medium');
+        expect(computeProjectionConfidence(0.25, 0, true)).toBe('medium');
+    });
+
+    test('high requires both a strong score and enough of the match', () => {
+        // Flat but only ~35% in: strong blended score, but below the high floor → medium.
+        expect(computeProjectionConfidence(0.35, 0, true)).toBe('medium');
+        // Flat and well past the high floor → high.
+        expect(computeProjectionConfidence(0.60, 0, true)).toBe('high');
+    });
+
+    test('at equal (sufficient) completion, consistency still separates the dots', () => {
+        // Both at 60% completion: the metronome (stdErr 0) reads high, the streaky
+        // shooter (wide band) is knocked down to medium.
+        expect(computeProjectionConfidence(0.60, 0, true)).toBe('high');
+        expect(computeProjectionConfidence(0.60, 9, true)).toBe('medium');
     });
 });

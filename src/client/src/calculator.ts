@@ -353,19 +353,36 @@ function computeStdErr(pcts: number[], weights: number[], avg: number, f: number
  * the dot and the projected range tell the same story, since both are driven by
  * the same {@link computeStdErr} band.
  *
+ * Completion also acts as a hard floor, independent of the blend: consistency
+ * can only *earn back* confidence once enough of the match is actually in. Below
+ * {@link MIN_FRAC_FOR_MEDIUM} of the match (by points) the dot is always `low`,
+ * however flat the early stages look; `high` additionally requires at least
+ * {@link MIN_FRAC_FOR_HIGH}. This stops a tiny, coincidentally-steady sample from
+ * reading as trustworthy.
+ *
  * @param f - Completed fraction of the match by points (0..1).
  * @param stdErr - The projection's spread band in percentage points.
  * @param hasSpread - False when there are <2 stages (no spread yet); then only
  *   completion drives it, so a tiny sample can't earn a solid dot for looking flat.
  *
- * Note: `K = 10pp` and the 0.6/0.4 blend are calibration constants — eyeball
- * them against a live match.
+ * Note: the completion floors, `K = 10pp`, and the 0.6/0.4 blend are calibration
+ * constants — eyeball them against a live match.
  */
+/** Need this share of the match (by points) before a projection can exceed `low`. */
+export const MIN_FRAC_FOR_MEDIUM = 0.20;
+/** Need this share of the match (by points), plus a strong blended score, for `high`. */
+export const MIN_FRAC_FOR_HIGH = 0.45;
 export function computeProjectionConfidence(f: number, stdErr: number, hasSpread: boolean): RivalConfidence {
+    // Completion floor: too little of the match is in to trust any projection,
+    // no matter how consistent the shooting has been so far.
+    if (f < MIN_FRAC_FOR_MEDIUM) return 'low';
+
     const completionScore = clamp01(f / 0.6);                                        // ~60% of match (by points) ≈ fully sampled
     const precisionScore = hasSpread ? clamp01(1 - stdErr / 10) : completionScore;   // a ~10pp band ≈ no precision
     const score = 0.6 * completionScore + 0.4 * precisionScore;
-    return score >= 0.75 ? 'high' : score >= 0.45 ? 'medium' : 'low';
+
+    if (score >= 0.75 && f >= MIN_FRAC_FOR_HIGH) return 'high';
+    return score >= 0.45 ? 'medium' : 'low';
 }
 
 /**
