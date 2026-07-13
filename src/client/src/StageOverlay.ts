@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import { Hits } from './types';
+import { formatStageLabel } from './stageLabel';
 
 // ─── Shared drawing helpers ───────────────────────────────────────────────────
 
@@ -86,7 +87,9 @@ function sanitiseFilename(s: string): string {
 // ─── Image 1: Stage Result ────────────────────────────────────────────────────
 
 export interface StageResultParams {
-  stageName: string;
+  stageNumber: number;
+  /** Raw stage name (may be absent); combined with the number by {@link formatStageLabel}. */
+  stageName?: string;
   hitFactor: number;
   time: number;
   stageScore: number;
@@ -114,7 +117,7 @@ export function downloadStageResultImage(params: StageResultParams): void {
   // ── Header ──────────────────────────────────────────────────────
   ctx.fillStyle = COLORS.accent;
   ctx.font = 'bold 22px system-ui, sans-serif';
-  ctx.fillText(params.stageName, PAD, PAD + 22);
+  ctx.fillText(formatStageLabel(params.stageNumber, params.stageName), PAD, PAD + 22);
 
   drawDivider(ctx, PAD + 40);
 
@@ -174,7 +177,7 @@ export function downloadStageResultImage(params: StageResultParams): void {
     ctx.fillText(String(value), x, hitValY);
   });
 
-  const filename = `${sanitiseFilename(params.stageName)}_result.png`;
+  const filename = `${sanitiseFilename(formatStageLabel(params.stageNumber, params.stageName))}_result.png`;
   triggerDownload(canvas, filename);
 }
 
@@ -194,7 +197,7 @@ export function buildStageResultCanvas(params: StageResultParams): HTMLCanvasEle
 
   ctx.fillStyle = COLORS.accent;
   ctx.font = 'bold 22px system-ui, sans-serif';
-  ctx.fillText(params.stageName, PAD, PAD + 22);
+  ctx.fillText(formatStageLabel(params.stageNumber, params.stageName), PAD, PAD + 22);
   drawDivider(ctx, PAD + 40);
 
   ctx.fillStyle = COLORS.muted;
@@ -254,8 +257,9 @@ export interface StandingRow {
 }
 
 export interface StandingsParams {
-  stageName: string;
   stageNumber: number;
+  /** Raw stage name (may be absent); combined with the number by {@link formatStageLabel}. */
+  stageName?: string;
   rows: StandingRow[];
   movement: Movement;
   shooterTotalScore: number;
@@ -298,7 +302,7 @@ export function downloadStandingsImage(params: StandingsParams): void {
   // ── Header ──────────────────────────────────────────────────────
   ctx.fillStyle = COLORS.accent;
   ctx.font = 'bold 22px system-ui, sans-serif';
-  ctx.fillText(`Standings after ${params.stageName}`, PAD, PAD + 22);
+  ctx.fillText(`Standings after ${formatStageLabel(params.stageNumber, params.stageName)}`, PAD, PAD + 22);
 
   ctx.fillStyle = COLORS.muted;
   ctx.font = '16px system-ui, sans-serif';
@@ -349,7 +353,7 @@ export function downloadStandingsImage(params: StandingsParams): void {
     }
   });
 
-  const filename = `${sanitiseFilename(params.stageName)}_standings.png`;
+  const filename = `${sanitiseFilename(formatStageLabel(params.stageNumber, params.stageName))}_standings.png`;
   triggerDownload(canvas, filename);
 }
 
@@ -363,7 +367,7 @@ export function buildStandingsCanvas(params: StandingsParams): HTMLCanvasElement
 
   ctx.fillStyle = COLORS.accent;
   ctx.font = 'bold 22px system-ui, sans-serif';
-  ctx.fillText(`Standings after ${params.stageName}`, PAD, PAD + 22);
+  ctx.fillText(`Standings after ${formatStageLabel(params.stageNumber, params.stageName)}`, PAD, PAD + 22);
 
   ctx.fillStyle = COLORS.muted;
   ctx.font = '16px system-ui, sans-serif';
