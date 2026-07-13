@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import crypto from 'crypto';
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
@@ -83,6 +84,29 @@ const port = config.port;
 // Using 1 to trust only the first proxy (nginx) instead of true which is too permissive
 app.set('trust proxy', 1);
 
+/**
+ * Per-process salt so hashed-IP visitor ids can't be reversed or correlated
+ * across restarts. Regenerated each boot, consistent with the in-memory store.
+ */
+const VISITOR_ID_SALT = crypto.randomBytes(16).toString('hex');
+
+/**
+ * Best-effort per-browser id for unique-visitor counting on hot matches. Prefers
+ * the client's anonymous `x-visitor-id` (validated and length-bounded to cap
+ * memory and blunt spoofing); falls back to a salted hash of the client IP so
+ * older cached clients that don't send the header never regress to raw request
+ * counts. The `c:`/`ip:` prefixes keep the two id spaces from colliding.
+ */
+function resolveVisitorId(req: express.Request): string {
+  const header = req.get('x-visitor-id');
+  if (header && /^[A-Za-z0-9_-]{8,64}$/.test(header)) {
+    return `c:${header}`;
+  }
+  const ip = req.ip || 'unknown';
+  const hash = crypto.createHash('sha256').update(VISITOR_ID_SALT).update(ip).digest('hex');
+  return `ip:${hash.slice(0, 16)}`;
+}
+
 // Enable CORS for all routes
 app.use(cors());
 // Parse JSON request bodies
@@ -159,12 +183,14 @@ app.get('/:matchType/:matchId/:division/parse', async (req, res) => {
 
   try {
     const cacheKey = `${matchType}-${matchId}-${division}`;
-    
+    // Resolve the viewer once so cache hits and fresh fetches dedup identically.
+    const visitorId = resolveVisitorId(req);
+
     // Check response cache first (short TTL)
     const cachedResult = getCachedResponse(cacheKey);
     if (cachedResult) {
       // Cache hits are still real views — count them for hot-match tracking.
-      recordHit(matchType, matchId, division, cachedResult.eventName);
+      recordHit(matchType, matchId, division, cachedResult.eventName, visitorId);
       return res.json(cachedResult);
     }
 
@@ -175,7 +201,7 @@ app.get('/:matchType/:matchId/:division/parse', async (req, res) => {
     // Cache the response
     setCachedResponse(cacheKey, result);
 
-    recordHit(matchType, matchId, division, result.eventName);
+    recordHit(matchType, matchId, division, result.eventName, visitorId);
     res.json(result);
   } catch (error) {
     if (error instanceof AppError) {
