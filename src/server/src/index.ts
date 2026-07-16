@@ -1,4 +1,8 @@
 import 'dotenv/config';
+// Side-effect import: initializes OpenTelemetry before any instrument/logger is
+// created. Must stay directly after dotenv/config and before ./metrics, ./logger
+// and ./graphql (see telemetry.ts for why ordering matters).
+import './telemetry';
 import crypto from 'crypto';
 import express from 'express';
 import cors from 'cors';
@@ -7,7 +11,18 @@ import { config } from './config';
 import { AppError } from './errors';
 import { fetchEventWithCache, getGraphQLCacheStats, clearGraphQLCache, transformStages, CachedEvent, LiveScoresResult } from './graphql';
 import { Stage } from './types';
-import { recordHit, getHotMatches, DEFAULT_LIMIT } from './hotMatches';
+import { recordHit, getHotMatches, getActiveMatchCount, DEFAULT_LIMIT } from './hotMatches';
+import { logger } from './logger';
+import {
+  recordHttpRequest,
+  recordCacheAccess,
+  recordClientEvent,
+  recordClientEventRejected,
+  recordExcludedStageCount,
+  recordComparisonSize,
+  initMetricGauges,
+  ClientEventAttributes,
+} from './metrics';
 
 // ============================================================================
 // Response Cache (short TTL for reducing API load)
@@ -90,6 +105,33 @@ export function getResponseCacheStats(): { size: number; ttlMs: number } {
 }
 
 /**
+ * Valid division codes. Shared by the `/parse` route and the `/events` analytics
+ * endpoint so both validate divisions against the same allowlist.
+ */
+const VALID_DIVISIONS = ['all', 'hg1', 'hg2', 'hg3', 'hg5', 'hg12', 'hg17', 'hg18', 'hg33'];
+
+/** Result views/tabs the client can page between (mirrors client `VIEWS`). */
+const VALID_VIEWS = ['standings', 'stages', 'projected'];
+
+/**
+ * Known IPSC category codes (plus 'Overall'). Anything else a client sends is
+ * bucketed to 'other' so metric label cardinality stays bounded.
+ */
+const KNOWN_CATEGORIES = ['Overall', 'O', 'L', 'LS', 'SJ', 'J', 'S', 'SS', 'GS'];
+
+/** Client behavior events we accept on `/events`. */
+const VALID_CLIENT_EVENTS = [
+  'view_changed',
+  'division_selected',
+  'category_selected',
+  'stages_excluded',
+  'comparison_changed',
+];
+
+/** Upper bound for stage/competitor counts, guarding against absurd payloads. */
+const MAX_COUNT = 100;
+
+/**
  * Express application instance.
  * Exported for testing purposes (e.g., with supertest).
  */
@@ -130,6 +172,32 @@ app.use(cors());
 app.use(express.json());
 
 /**
+ * HTTP request metrics. Records latency per request labeled by method, a
+ * normalized route pattern, and status code. Using the matched route pattern
+ * (e.g. `/:matchType/:matchId/:division/parse`) rather than the raw URL keeps
+ * label cardinality bounded; unmatched requests collapse to `unmatched`.
+ */
+app.use((req, res, next) => {
+  const start = process.hrtime.bigint();
+  res.on('finish', () => {
+    const seconds = Number(process.hrtime.bigint() - start) / 1e9;
+    const route = req.route?.path
+      ? String(req.route.path)
+      : (req.baseUrl || 'unmatched');
+    recordHttpRequest(req.method, route, res.statusCode, seconds);
+  });
+  next();
+});
+
+// Feed the observable gauges (cache sizes, active hot matches, process memory).
+// No-op when monitoring is disabled since the instruments are no-op.
+initMetricGauges({
+  responseCacheSize: () => getResponseCacheStats().size,
+  graphqlCacheSize: () => getGraphQLCacheStats().size,
+  hotMatchesActive: () => getActiveMatchCount(),
+});
+
+/**
  * Rate limiting middleware
  * Configurable via RATE_LIMIT_ENABLED, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX env vars
  */
@@ -149,6 +217,7 @@ const apiLimiter = rateLimit({
 if (config.rateLimitEnabled && process.env.NODE_ENV !== 'test') {
   app.use('/api/', apiLimiter);
   app.use('/:matchType/:matchId/:division/parse', apiLimiter);
+  app.use('/events', apiLimiter);
 }
 
 /**
@@ -189,10 +258,9 @@ app.get('/:matchType/:matchId/:division/parse', async (req, res) => {
   }
 
   // Validate division format
-  const validDivisions = ['all', 'hg1', 'hg2', 'hg3', 'hg5', 'hg12', 'hg17', 'hg18', 'hg33'];
-  if (division !== 'all' && !validDivisions.includes(division)) {
+  if (division !== 'all' && !VALID_DIVISIONS.includes(division)) {
     return res.status(400).json({ 
-      error: `Invalid division code. Valid values: ${validDivisions.join(', ')}`,
+      error: `Invalid division code. Valid values: ${VALID_DIVISIONS.join(', ')}`,
       code: 'VALIDATION_ERROR',
       timestamp: new Date().toISOString()
     });
@@ -210,10 +278,12 @@ app.get('/:matchType/:matchId/:division/parse', async (req, res) => {
     // transform for this division — no re-transformation.
     const cached = getCachedResponse(cacheKey, division);
     if (cached) {
+      recordCacheAccess('response', 'hit');
       // Cache hits are still real views — count them for hot-match tracking.
       recordHit(matchType, matchId, division, cached.eventName, visitorId);
       return res.json(cached);
     }
+    recordCacheAccess('response', 'miss');
 
     // Fetch the full event (all divisions) from the GraphQL API, cache the raw
     // stages, and return the transformed result for the requested division.
@@ -225,11 +295,14 @@ app.get('/:matchType/:matchId/:division/parse', async (req, res) => {
   } catch (error) {
     if (error instanceof AppError) {
       // Log timeout errors with more detail
-      if (error.statusCode === 504) {
-        console.error(`[GraphQL Timeout] Request failed for matchType=${matchType}, matchId=${matchId}, division=${division}: ${error.message}`);
-      } else {
-        console.error(`[GraphQL Error] Request failed for matchType=${matchType}, matchId=${matchId}, division=${division}: ${error.message}`);
-      }
+      const kind = error.statusCode === 504 ? 'GraphQL Timeout' : 'GraphQL Error';
+      logger.error(`[${kind}] Request failed for matchType=${matchType}, matchId=${matchId}, division=${division}: ${error.message}`, {
+        matchType,
+        matchId,
+        division,
+        statusCode: error.statusCode,
+        code: error.code,
+      });
       
       // Enhance error response for API timeouts
       const isTimeout = error.statusCode === 504;
@@ -244,8 +317,12 @@ app.get('/:matchType/:matchId/:division/parse', async (req, res) => {
         ...(process.env.NODE_ENV === 'development' && error.cause ? { details: String(error.cause) } : {})
       });
     } else {
-      console.error(`[Error] Unexpected error fetching livescore for matchType=${matchType}, matchId=${matchId}, division=${division}:`, error);
-      res.status(500).json({ 
+      logger.error(`[Error] Unexpected error fetching livescore for matchType=${matchType}, matchId=${matchId}, division=${division}: ${error instanceof Error ? error.message : String(error)}`, {
+        matchType,
+        matchId,
+        division,
+      });
+      res.status(500).json({
         error: 'Failed to fetch livescore',
         code: 'INTERNAL_ERROR',
         timestamp: new Date().toISOString()
@@ -331,6 +408,61 @@ app.get('/hot-matches', (req, res) => {
 });
 
 /**
+ * POST endpoint for anonymous client behavior analytics.
+ *
+ * The client fires small, fire-and-forget events describing UI interactions that
+ * never otherwise reach the server (tab switches, division/category selection,
+ * stage exclusion, comparison). We validate them against fixed allowlists — this
+ * server-side normalization is what keeps metric label cardinality bounded — and
+ * turn each valid event into an OpenTelemetry counter increment.
+ *
+ * Always responds 204 (even for invalid input) so a misbehaving or outdated
+ * client can never be paged by, or learn anything from, the analytics path.
+ * Reached via nginx's `/api/*` -> `/*` rewrite (like `/hot-matches`).
+ *
+ * @route POST /events
+ * @body {string} event - One of VALID_CLIENT_EVENTS
+ * @body {object} [props] - Optional { view, division, category, count, size }
+ */
+app.post('/events', (req, res) => {
+  const body = (req.body ?? {}) as { event?: unknown; props?: unknown };
+  const event = typeof body.event === 'string' ? body.event : '';
+  const props = (typeof body.props === 'object' && body.props !== null ? body.props : {}) as Record<string, unknown>;
+
+  if (!VALID_CLIENT_EVENTS.includes(event)) {
+    recordClientEventRejected();
+    return res.status(204).end();
+  }
+
+  // Normalize the optional dimensions against fixed enums; drop anything unknown.
+  const attrs: ClientEventAttributes = {};
+  if (event === 'view_changed' && typeof props.view === 'string' && VALID_VIEWS.includes(props.view)) {
+    attrs.view = props.view;
+  }
+  if (event === 'division_selected' && typeof props.division === 'string' && VALID_DIVISIONS.includes(props.division)) {
+    attrs.division = props.division;
+  }
+  if (event === 'category_selected' && typeof props.category === 'string') {
+    attrs.category = KNOWN_CATEGORIES.includes(props.category) ? props.category : 'other';
+  }
+
+  recordClientEvent(event, attrs);
+
+  // Bounded numeric detail for the two events that carry a magnitude.
+  const rawCount = Number(props.count ?? props.size);
+  if (Number.isFinite(rawCount)) {
+    const count = Math.min(MAX_COUNT, Math.max(0, Math.floor(rawCount)));
+    if (event === 'stages_excluded' && count > 0) {
+      recordExcludedStageCount(count);
+    } else if (event === 'comparison_changed' && count >= 2) {
+      recordComparisonSize(count);
+    }
+  }
+
+  return res.status(204).end();
+});
+
+/**
  * Health check endpoint for monitoring and load balancers
  *
  * @route GET /health
@@ -371,7 +503,9 @@ app.get('/health', (req, res) => {
 // Only start server if not in test environment
 if (process.env.NODE_ENV !== 'test' && !process.env.JEST_WORKER_ID) {
   app.listen(port, '0.0.0.0', () => {
-    // eslint-disable-next-line no-console
-    console.log(`Server running on port ${port}`);
+    logger.info(`Server running on port ${port}`, {
+      port,
+      monitoringEnabled: config.monitoring.enabled,
+    });
   });
 }

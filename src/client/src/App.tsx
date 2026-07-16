@@ -14,6 +14,7 @@ import {
 import OverlaySettingsModal from './OverlaySettingsModal';
 import HotMatches, { HotMatch } from './HotMatches';
 import { formatStageLabel } from './stageLabel';
+import { track, setAnalyticsVisitorId } from './analytics';
 
 interface Division {
   value: string;
@@ -179,6 +180,8 @@ function App() {
     if (next === activeView) return;
     setSlideDir(VIEWS.indexOf(next) > VIEWS.indexOf(activeView) ? 'left' : 'right');
     setActiveView(next);
+    // Fires for both tab taps and swipes (both funnel through here).
+    track('view_changed', { view: next });
   };
 
   const handleViewTouchStart = (e: React.TouchEvent) => {
@@ -199,6 +202,11 @@ function App() {
     const nextIdx = dx < 0 ? idx + 1 : idx - 1;
     if (nextIdx >= 0 && nextIdx < VIEWS.length) goToView(VIEWS[nextIdx]);
   };
+
+  // Give analytics the same anonymous visitor id used for `/parse`, once.
+  useEffect(() => {
+    setAnalyticsVisitorId(getVisitorId());
+  }, []);
 
   // Update URL when matchId, typeId, division, selectedCompetitors, excludedStages, or category change
   useEffect(() => {
@@ -412,11 +420,14 @@ function App() {
 
   const toggleCompetitor = (competitorKey: string) => {
     setSelectedCompetitors(prev => {
-      if (prev.includes(competitorKey)) {
-        return prev.filter(key => key !== competitorKey);
-      } else {
-        return [...prev, competitorKey];
+      const next = prev.includes(competitorKey)
+        ? prev.filter(key => key !== competitorKey)
+        : [...prev, competitorKey];
+      // A real comparison starts at 2+ selected competitors.
+      if (next.length >= 2) {
+        track('comparison_changed', { size: next.length });
       }
+      return next;
     });
   };
 
@@ -845,6 +856,10 @@ function App() {
   const selectedStageOptions: StageOption[] = stageOptions.filter(o => excludedStages.includes(o.value));
   const handleExcludedStagesChange = (opts: MultiValue<StageOption>) => {
     setExcludedStages(opts.map(o => o.value));
+    // Report only real exclusions, not clear-outs, so the metric measures usage.
+    if (opts.length > 0) {
+      track('stages_excluded', { count: opts.length });
+    }
   };
 
   type CompetitorOption = { value: string; label: string };
@@ -852,6 +867,9 @@ function App() {
   const selectedCompetitorOptions: CompetitorOption[] = competitorOptions.filter(o => selectedCompetitors.includes(o.value));
   const handleSelectedCompetitorsChange = (opts: MultiValue<CompetitorOption>) => {
     setSelectedCompetitors(opts.map(o => o.value));
+    if (opts.length >= 2) {
+      track('comparison_changed', { size: opts.length });
+    }
   };
 
   // Stage Results helpers
@@ -905,7 +923,10 @@ function App() {
           <input type="hidden" name="matchId" value={matchId} />
           <select
             value={division}
-            onChange={(e) => setDivision(e.target.value)}
+            onChange={(e) => {
+              setDivision(e.target.value);
+              track('division_selected', { division: e.target.value });
+            }}
             className="division-select"
           >
             {DIVISIONS.map((div) => (
@@ -916,7 +937,10 @@ function App() {
           </select>
           <select
             value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
+            onChange={(e) => {
+              setSelectedCategory(e.target.value);
+              track('category_selected', { category: e.target.value });
+            }}
             className="division-select"
             title="Filter by competitor category"
           >

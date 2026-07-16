@@ -177,6 +177,63 @@ The server can be configured using environment variables:
 - `RESPONSE_CACHE_TTL_MS`: Response (burst) cache TTL in ms (default: 30000 = 30 seconds)
 - `NODE_ENV`: Node environment - `development`, `production`, or `test`
 
+Monitoring (see [Monitoring](#monitoring-grafana-cloud)):
+- `MONITORING_ENABLED`: Set to `false` to hard-disable telemetry (default: enabled *if* an OTLP endpoint is set)
+- `OTEL_EXPORTER_OTLP_ENDPOINT`: Base OTLP endpoint (e.g. Grafana Cloud OTLP gateway). Blank = monitoring off
+- `OTEL_EXPORTER_OTLP_HEADERS`: Auth header, e.g. `Authorization=Basic <base64 of instanceID:token>`
+- `OTEL_EXPORTER_OTLP_PROTOCOL`: `http/protobuf` (recommended)
+- `OTEL_SERVICE_NAME`: Service name on metrics/logs (default: `livescore-server`)
+- `OTEL_DEPLOYMENT_ENVIRONMENT`: `deployment.environment.name` attribute (default: `NODE_ENV`)
+- `OTEL_METRIC_EXPORT_INTERVAL_MS`: Metric push interval (default: 60000)
+
+## Monitoring (Grafana Cloud)
+
+The server can emit **metrics and structured logs** straight to Grafana Cloud over
+OTLP (OpenTelemetry, `http/protobuf`) — no agent or sidecar collector required.
+Telemetry is **opt-in**: it only starts when `OTEL_EXPORTER_OTLP_ENDPOINT` is set,
+`MONITORING_ENABLED` isn't `false`, and `NODE_ENV` isn't `test`. Otherwise every
+instrument is a no-op, so local dev and tests are unaffected.
+
+### Setup
+
+1. In Grafana Cloud, open your stack → **Connections → OTLP** (or *Configure →
+   OpenTelemetry*) to find the OTLP endpoint (`https://otlp-gateway-<zone>.grafana.net/otlp`),
+   your **instance ID**, and generate a token.
+2. Base64-encode the credentials:
+   ```bash
+   echo -n '<instanceID>:<token>' | base64
+   ```
+3. Set the env vars (see `.env.example`):
+   ```env
+   OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp-gateway-<zone>.grafana.net/otlp
+   OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic <base64 from step 2>
+   OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+   OTEL_SERVICE_NAME=livescore-server
+   ```
+
+Metrics then appear in your Cloud Prometheus datasource and logs in Loki, tagged
+`service_name="livescore-server"`.
+
+### What's exported
+
+**Infra health**
+- `http_server_request_duration_seconds` — request latency `{method, route, status_code}`
+- `cache_access_total` — cache lookups `{cache="response|graphql", result="hit|miss"}`
+- `ssi_query_duration_seconds` / `ssi_query_errors_total` — upstream SSI latency & errors `{kind="full|incremental"}`
+- `ssi_fetch_coalesced_total` — requests coalesced onto an in-flight fetch (single-flight)
+- `cache_entries`, `hot_matches_active`, `process_heap_used_bytes`, `process_rss_bytes`, `process_uptime_seconds`
+
+**Product / behavior analytics** (anonymous, from the client via `POST /api/events`)
+- `client_event_total{event, view, division, category}` — `event` ∈ `view_changed`,
+  `division_selected`, `category_selected`, `stages_excluded`, `comparison_changed`.
+  Answers: which result tabs get used, the most-selected division/category, whether
+  people exclude stages or compare competitors.
+- `client_excluded_stage_count` / `client_comparison_size` — magnitude histograms
+- `client_event_rejected_total` — events dropped by server-side validation
+
+Logs (timeout/error context, incremental-fetch fallbacks, startup) carry structured
+attributes (`matchType`, `matchId`, `division`, …) rather than baked-in strings.
+
 ## Development with Mock API
 
 The mock API server replaces the live ShootnScoreIt.com API during development. It serves a static snapshot of real competition data, filtered by a configurable **virtual time** — so you can start at the beginning of a competition (no results) and fast-forward through the day without needing a live API connection or valid credentials.
