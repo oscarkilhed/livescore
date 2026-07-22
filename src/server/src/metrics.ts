@@ -137,6 +137,8 @@ export interface GaugeSources {
   responseCacheSize: () => number;
   graphqlCacheSize: () => number;
   hotMatchesActive: () => number;
+  /** Distinct active-visitor counts keyed by sliding-window label (e.g. `5m`). */
+  activeUserCounts: () => Record<string, number>;
 }
 
 let gaugesRegistered = false;
@@ -163,6 +165,16 @@ export function initMetricGauges(sources: GaugeSources): void {
   });
   hotMatches.addCallback((observer) => {
     observer.observe(sources.hotMatchesActive());
+  });
+
+  const activeUsers = meter.createObservableGauge('active_users', {
+    description: 'Distinct active visitors within a sliding window (label: window)',
+  });
+  activeUsers.addCallback((observer) => {
+    const counts = sources.activeUserCounts();
+    for (const [window, count] of Object.entries(counts)) {
+      observer.observe(count, { window });
+    }
   });
 
   const heapUsed = meter.createObservableGauge('process.heap_used', {

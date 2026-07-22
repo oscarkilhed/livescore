@@ -62,6 +62,14 @@ process_heap_used_bytes
 process_rss_bytes
 process_uptime_seconds
 hot_matches_active
+
+# Distinct active visitors per sliding window (5m ≈ concurrent, 24h ≈ DAU).
+# Counted in-memory server-side; `window` is the only label. With a single
+# instance max == sum; if ever scaled out, neither aggregation is exact for a
+# distinct count (each instance holds its own set) — prefer a single instance.
+max by (window) (active_users)
+max(active_users{window="24h"})   # daily active users
+max(active_users{window="5m"})    # roughly-concurrent users
 ```
 
 ## Product / behavior analytics
