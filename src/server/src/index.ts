@@ -12,6 +12,7 @@ import { AppError } from './errors';
 import { fetchEventWithCache, getGraphQLCacheStats, clearGraphQLCache, transformStages, CachedEvent, LiveScoresResult } from './graphql';
 import { Stage } from './types';
 import { recordHit, getHotMatches, getActiveMatchCount, DEFAULT_LIMIT } from './hotMatches';
+import { recordActiveUser, getActiveUserCounts } from './activeUsers';
 import { logger } from './logger';
 import {
   recordHttpRequest,
@@ -195,6 +196,7 @@ initMetricGauges({
   responseCacheSize: () => getResponseCacheStats().size,
   graphqlCacheSize: () => getGraphQLCacheStats().size,
   hotMatchesActive: () => getActiveMatchCount(),
+  activeUserCounts: () => getActiveUserCounts(),
 });
 
 /**
@@ -273,6 +275,8 @@ app.get('/:matchType/:matchId/:division/parse', async (req, res) => {
     const contentType = parseInt(matchType, 10);
     // Resolve the viewer once so cache hits and fresh fetches dedup identically.
     const visitorId = resolveVisitorId(req);
+    // Count this viewer toward global active-users (union across all matches).
+    recordActiveUser(visitorId);
 
     // Check response cache first (short TTL). A hit returns the memoized
     // transform for this division — no re-transformation.
@@ -447,6 +451,8 @@ app.post('/events', (req, res) => {
   }
 
   recordClientEvent(event, attrs);
+  // A validated behavior event is a live viewer too — count toward active users.
+  recordActiveUser(resolveVisitorId(req));
 
   // Bounded numeric detail for the two events that carry a magnitude.
   const rawCount = Number(props.count ?? props.size);
